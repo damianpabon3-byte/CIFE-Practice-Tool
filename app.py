@@ -38,25 +38,36 @@ if uploaded_file is not None:
     # Generate Practice Sheet button
     if st.button("Generate Practice Sheet"):
         with st.spinner("Analyzing image and generating practice worksheet..."):
-            # System prompt for the AI - requesting JSON output
-            system_prompt = """You are a helpful teacher's assistant. You will be provided with an image of a student's notes. Analyze the content, identify the grade level and subject, and generate a 10-question multiple choice practice quiz to help the student review these concepts.
+            # System prompt for the AI - requesting JSON output with language detection
+            system_prompt = """You are a helpful teacher's assistant. You will be provided with an image of a student's handwritten notes.
 
-You MUST output your response as a valid JSON object with NO markdown formatting around it (no ```json blocks). Use this exact structure:
+IMPORTANT INSTRUCTIONS:
+1. LANGUAGE DETECTION: Analyze the language of the handwritten notes (e.g., Spanish, English, French, etc.). Generate the practice worksheet in that SAME language. If the notes are in Spanish, the quiz must be in Spanish. If in English, the quiz must be in English.
+
+2. Analyze the content, identify the grade level and subject.
+
+3. Generate a 10-question multiple choice practice quiz to help the student review these concepts.
+
+4. You MUST output your response as a valid JSON object with NO markdown formatting around it (no ```json blocks). Use this EXACT structure:
 
 {
   "subject": "Subject Name",
-  "topic": "Specific Topic",
-  "grade_level": "Grade X",
+  "grade_level": "Grade Level",
   "questions": [
     {
-      "question_text": "The question here",
+      "q": "The question text here",
       "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correct_answer": "Option A"
+      "answer": "The correct option text"
     }
   ]
 }
 
-Generate exactly 10 questions. Each question must have exactly 4 options. The correct_answer must match one of the options exactly."""
+REQUIREMENTS:
+- Generate exactly 10 questions
+- Each question must have exactly 4 options
+- The "answer" must match one of the options exactly
+- All text must be in the SAME language as the student's notes
+- Use proper UTF-8 characters for special characters (ñ, á, é, í, ó, ú, ü, etc.)"""
 
             # Make the API call with vision capabilities
             response = client.chat.completions.create(
@@ -71,7 +82,7 @@ Generate exactly 10 questions. Each question must have exactly 4 options. The co
                         "content": [
                             {
                                 "type": "text",
-                                "text": "Please analyze this notebook page and create a practice quiz in JSON format."
+                                "text": "Please analyze this notebook page. Detect the language of the notes and create a practice quiz in that same language. Output as pure JSON only."
                             },
                             {
                                 "type": "image_url",
@@ -95,12 +106,11 @@ Generate exactly 10 questions. Each question must have exactly 4 options. The co
                 # Display the generated content in Streamlit
                 st.subheader("Generated Practice Quiz")
                 st.write(f"**Subject:** {quiz_data['subject']}")
-                st.write(f"**Topic:** {quiz_data['topic']}")
                 st.write(f"**Grade Level:** {quiz_data['grade_level']}")
                 st.write("---")
 
                 for i, question in enumerate(quiz_data['questions'], 1):
-                    st.write(f"**{i}. {question['question_text']}**")
+                    st.write(f"**{i}. {question['q']}**")
                     for option in question['options']:
                         st.write(f"   • {option}")
                     st.write("")
@@ -108,23 +118,23 @@ Generate exactly 10 questions. Each question must have exactly 4 options. The co
                 # Create professionally formatted Word document
                 doc = Document()
 
-                # Add main heading
-                doc.add_heading("Practice Quiz", level=0)
+                # Add bold title using subject and grade_level
+                title = doc.add_heading(level=0)
+                title_run = title.add_run(f"{quiz_data['subject']} - {quiz_data['grade_level']}")
+                title_run.bold = True
 
-                # Add subject and topic as subheadings
-                doc.add_heading(f"Subject: {quiz_data['subject']}", level=1)
-                doc.add_heading(f"Topic: {quiz_data['topic']}", level=2)
-                doc.add_paragraph(f"Grade Level: {quiz_data['grade_level']}")
+                # Add subtitle
+                subtitle = doc.add_paragraph()
+                subtitle_run = subtitle.add_run("Practice Quiz")
+                subtitle_run.bold = True
+
                 doc.add_paragraph()  # Add spacing
-
-                # Add questions section heading
-                doc.add_heading("Questions", level=1)
 
                 # Iterate through questions
                 for i, question in enumerate(quiz_data['questions'], 1):
                     # Add question text as bold paragraph
                     question_para = doc.add_paragraph()
-                    question_run = question_para.add_run(f"{i}. {question['question_text']}")
+                    question_run = question_para.add_run(f"{i}. {question['q']}")
                     question_run.bold = True
 
                     # Add options as bullet points
@@ -137,15 +147,17 @@ Generate exactly 10 questions. Each question must have exactly 4 options. The co
                 # Add page break before answer key
                 doc.add_page_break()
 
-                # Add Answer Key section
-                doc.add_heading("Answer Key", level=1)
+                # Add Answer Key section with bold heading
+                answer_heading = doc.add_heading(level=1)
+                answer_heading_run = answer_heading.add_run("Answer Key")
+                answer_heading_run.bold = True
 
                 for i, question in enumerate(quiz_data['questions'], 1):
                     answer_para = doc.add_paragraph()
                     answer_para.add_run(f"{i}. ").bold = True
-                    answer_para.add_run(question['correct_answer'])
+                    answer_para.add_run(question['answer'])
 
-                # Save document to in-memory buffer
+                # Save document to in-memory buffer with UTF-8 encoding
                 buffer = io.BytesIO()
                 doc.save(buffer)
                 buffer.seek(0)
