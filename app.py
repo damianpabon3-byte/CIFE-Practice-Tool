@@ -3,6 +3,7 @@ import openai
 import base64
 import json
 import random
+import re
 from datetime import datetime
 
 # Configure the OpenAI client with API key from Streamlit secrets
@@ -463,6 +464,40 @@ def detect_language(text):
     text_lower = text.lower()
     spanish_count = sum(1 for word in spanish_indicators if f' {word} ' in f' {text_lower} ')
     return 'Spanish' if spanish_count >= 2 else 'English'
+
+def create_smart_blank(question_text, correct_answer):
+    """
+    Replace generic blank placeholders with a smart blank that matches
+    the correct answer length (ignoring spaces).
+
+    Example: If the answer is "fuerza" (6 letters), creates "_ _ _ _ _ _"
+
+    Args:
+        question_text: The question text containing a blank placeholder
+        correct_answer: The correct answer to determine blank length
+
+    Returns:
+        The question text with the smart blank replacing the placeholder
+    """
+    # Calculate the length of the answer (ignoring spaces)
+    answer_length = len(correct_answer.replace(" ", ""))
+
+    # Create the smart blank: underscores separated by spaces for readability
+    smart_blank = " ".join(["_"] * answer_length)
+
+    # Regex pattern to find common blank placeholders:
+    # - Multiple underscores: ____, ________, etc. (3 or more)
+    # - Multiple dots: ...., ........, etc. (3 or more)
+    # - Already spaced underscores: _ _ _ _ (3 or more underscores with spaces)
+    blank_pattern = r'(?:_{3,}|\.{4,}|(?:_\s+){2,}_)'
+
+    # Check if there's a blank placeholder in the question
+    if re.search(blank_pattern, question_text):
+        # Replace the first placeholder with the smart blank
+        return re.sub(blank_pattern, smart_blank, question_text, count=1)
+    else:
+        # Edge case: no blank found, append smart blank at the end
+        return f"{question_text} {smart_blank}"
 
 # ============================================
 # AI QUIZ GENERATION - BATCHED
@@ -1138,7 +1173,12 @@ def render_game_screen():
     st.markdown(f'<div style="text-align: center;"><span class="question-badge {badge_class}">{badge_text}</span></div>', unsafe_allow_html=True)
 
     # Question text - big and bold
-    st.markdown(f'<div class="question-text">❓ {question["q"]}</div>', unsafe_allow_html=True)
+    # For short answer questions, apply smart blank to show answer length hint
+    if question['type'] == 'short_answer':
+        display_question = create_smart_blank(question['q'], question['answer'])
+    else:
+        display_question = question['q']
+    st.markdown(f'<div class="question-text">❓ {display_question}</div>', unsafe_allow_html=True)
 
     st.write("")
 
