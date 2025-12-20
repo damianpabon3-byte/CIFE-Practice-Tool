@@ -139,44 +139,18 @@ def render_card_button(
     Returns:
         True if button was clicked
     """
-    colors = {
-        "primary": ("linear-gradient(135deg, #4F46E5 0%, #6366F1 100%)", "#4338CA"),
-        "success": ("linear-gradient(135deg, #34D399 0%, #10B981 100%)", "#059669"),
-        "error": ("linear-gradient(135deg, #F87171 0%, #EF4444 100%)", "#DC2626"),
-        "secondary": ("linear-gradient(135deg, #E5E7EB 0%, #D1D5DB 100%)", "#9CA3AF")
-    }
+    button_text = f"{icon} {text}" if icon else text
+    clicked = st.button(
+        button_text,
+        key=key,
+        use_container_width=True,
+        disabled=disabled
+    )
 
-    bg, hover_bg = colors.get(variant, colors["primary"])
-    text_color = "#FFFFFF" if variant != "secondary" else "#374151"
+    if clicked and callback:
+        callback()
 
-    # Create a unique container with custom styling
-    button_id = f"card-btn-{key}"
-
-    custom_style = f"""
-    <style>
-    div[data-testid="stHorizontalBlock"] div[data-testid="column"]:has(button[kind="primary"]) {{
-        width: 100%;
-    }}
-    </style>
-    """
-    st.markdown(custom_style, unsafe_allow_html=True)
-
-    # Use Streamlit's native button with custom key
-    with st.container():
-        col1, col2, col3 = st.columns([1, 3, 1])
-        with col2:
-            button_text = f"{icon} {text}" if icon else text
-            clicked = st.button(
-                button_text,
-                key=key,
-                use_container_width=True,
-                disabled=disabled
-            )
-
-            if clicked and callback:
-                callback()
-
-            return clicked
+    return clicked
 
 
 def render_option_card(
@@ -201,70 +175,7 @@ def render_option_card(
     Returns:
         True if clicked
     """
-    # Determine styling based on state
-    if is_correct is True:
-        bg = "linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%)"
-        border = "#34D399"
-        icon = "✓"
-    elif is_correct is False:
-        bg = "linear-gradient(135deg, #FEE2E2 0%, #FECACA 100%)"
-        border = "#F87171"
-        icon = "✗"
-    elif is_selected:
-        bg = "linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%)"
-        border = "#4F46E5"
-        icon = ""
-    else:
-        bg = "#FFFFFF"
-        border = "#E5E7EB"
-        icon = ""
-
-    label_colors = {
-        "A": "#4F46E5",
-        "B": "#059669",
-        "C": "#DC2626",
-        "D": "#D97706"
-    }
-
-    label_color = label_colors.get(option_label, "#4F46E5")
-
-    card_html = f"""
-    <div style="
-        background: {bg};
-        border: 3px solid {border};
-        border-radius: 16px;
-        padding: 1rem 1.5rem;
-        margin: 0.5rem 0;
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        transition: all 0.2s ease;
-        cursor: {'not-allowed' if disabled else 'pointer'};
-        opacity: {'0.7' if disabled else '1'};
-    ">
-        <div style="
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: {label_color};
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 700;
-            font-size: 1.2rem;
-            flex-shrink: 0;
-        ">{option_label}</div>
-        <div style="
-            font-family: 'Fredoka', sans-serif;
-            font-size: 1.1rem;
-            flex-grow: 1;
-        ">{option_text}</div>
-        {f'<div style="font-size: 1.5rem;">{icon}</div>' if icon else ''}
-    </div>
-    """
-
-    # We can't make the HTML directly clickable, so we use a button
+    # Use Streamlit's native button
     clicked = st.button(
         f"{option_label}. {option_text}",
         key=key,
