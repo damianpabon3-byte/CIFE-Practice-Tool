@@ -345,22 +345,12 @@ def render_header(title: str, subtitle: str = "", emoji: str = "") -> None:
         subtitle: Optional subtitle
         emoji: Optional emoji to display
     """
-    header_html = f"""
-    <div style="text-align: center; padding: 2rem 0; margin-bottom: 2rem;">
-        {f'<div style="font-size: 4rem; margin-bottom: 0.5rem;">{emoji}</div>' if emoji else ''}
-        <h1 style="
-            font-family: 'Fredoka', sans-serif;
-            font-size: 2.5rem;
-            font-weight: 700;
-            background: linear-gradient(135deg, #4F46E5 0%, #818CF8 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            margin: 0;
-        ">{title}</h1>
-        {f'<p style="font-family: Fredoka, sans-serif; font-size: 1.2rem; color: #6B7280; margin-top: 0.5rem;">{subtitle}</p>' if subtitle else ''}
-    </div>
-    """
+    container_style = "text-align:center;padding:2rem 0;margin-bottom:2rem;"
+    emoji_html = f'<div style="font-size:4rem;margin-bottom:0.5rem;">{emoji}</div>' if emoji else ''
+    title_style = "font-family:'Fredoka',sans-serif;font-size:2.5rem;font-weight:700;background:linear-gradient(135deg,#4F46E5 0%,#818CF8 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:0;"
+    subtitle_html = f'<p style="font-family:Fredoka,sans-serif;font-size:1.2rem;color:#6B7280;margin-top:0.5rem;">{subtitle}</p>' if subtitle else ''
+    
+    header_html = f'<div style="{container_style}">{emoji_html}<h1 style="{title_style}">{title}</h1>{subtitle_html}</div>'
     st.markdown(header_html, unsafe_allow_html=True)
 
 
@@ -379,6 +369,8 @@ def render_card(
         variant: "default", "success", "error", "warning"
         custom_class: Additional CSS class
     """
+    import re
+    
     bg_colors = {
         "default": "#FFFFFF",
         "success": "linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%)",
@@ -393,19 +385,18 @@ def render_card(
         "warning": "#FBBF24"
     }
 
-    card_html = f"""
-    <div class="game-card {custom_class}" style="
-        background: {bg_colors.get(variant, bg_colors['default'])};
-        border: 3px solid {border_colors.get(variant, 'transparent')};
-        border-radius: 24px;
-        padding: 2rem;
-        margin: 1rem 0;
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-    ">
-        {f'<h3 style="margin-top: 0; font-family: Fredoka, sans-serif; font-weight: 600;">{title}</h3>' if title else ''}
-        {content}
-    </div>
-    """
+    # Clean content: collapse whitespace and newlines to single spaces
+    clean_content = re.sub(r'\s+', ' ', content.strip())
+    
+    # Build card style as single line
+    card_style = f"background:{bg_colors.get(variant, bg_colors['default'])};border:3px solid {border_colors.get(variant, 'transparent')};border-radius:24px;padding:2rem;margin:1rem 0;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);"
+    
+    # Build title HTML if provided
+    title_html = f'<h3 style="margin-top:0;font-family:Fredoka,sans-serif;font-weight:600;">{title}</h3>' if title else ''
+    
+    # Combine into single-line HTML
+    card_html = f'<div class="game-card {custom_class}" style="{card_style}">{title_html}{clean_content}</div>'
+    
     st.markdown(card_html, unsafe_allow_html=True)
 
 
@@ -442,14 +433,7 @@ def render_card_button(
     text_color = "#FFFFFF" if variant != "secondary" else "#374151"
 
     # Inject custom styling for this button variant
-    custom_style = f"""
-    <style>
-    div[data-testid="stButton"] > button {{
-        min-height: 60px !important;
-        border-radius: 24px !important;
-    }}
-    </style>
-    """
+    custom_style = '<style>div[data-testid="stButton"] > button {min-height:60px !important;border-radius:24px !important;}</style>'
     st.markdown(custom_style, unsafe_allow_html=True)
 
     # Use Streamlit's native button with custom key
@@ -521,56 +505,18 @@ def render_option_card(
 
     label_color = label_colors.get(option_label, "#4F46E5")
 
+    # Build styles as single lines
+    card_style = f"background:{bg};border:3px solid {border};border-radius:20px;padding:1rem 1.5rem;min-height:60px;margin:0.5rem 0;display:flex;align-items:center;gap:1rem;transition:all 0.2s ease;opacity:{'0.7' if disabled else '1'};"
+    label_style = f"width:44px;height:44px;border-radius:50%;background:{label_color};color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1.2rem;font-family:'Fredoka',sans-serif;flex-shrink:0;"
+    text_style = "font-family:'Fredoka',sans-serif;font-size:1.1rem;flex-grow:1;color:#1F2937;"
+    icon_html = f'<div style="font-size:1.5rem;flex-shrink:0;">{icon}</div>' if icon else ''
+
     # Render the styled option card HTML
-    card_html = f"""
-    <div class="option-card {animation_class}" style="
-        background: {bg};
-        border: 3px solid {border};
-        border-radius: 20px;
-        padding: 1rem 1.5rem;
-        min-height: 60px;
-        margin: 0.5rem 0;
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        transition: all 0.2s ease;
-        opacity: {'0.7' if disabled else '1'};
-    ">
-        <div style="
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            background: {label_color};
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 700;
-            font-size: 1.2rem;
-            font-family: 'Fredoka', sans-serif;
-            flex-shrink: 0;
-        ">{option_label}</div>
-        <div style="
-            font-family: 'Fredoka', sans-serif;
-            font-size: 1.1rem;
-            flex-grow: 1;
-            color: #1F2937;
-        ">{option_text}</div>
-        {f'<div style="font-size: 1.5rem; flex-shrink: 0;">{icon}</div>' if icon else ''}
-    </div>
-    """
+    card_html = f'<div class="option-card {animation_class}" style="{card_style}"><div style="{label_style}">{option_label}</div><div style="{text_style}">{option_text}</div>{icon_html}</div>'
     st.markdown(card_html, unsafe_allow_html=True)
 
     # Use a native Streamlit button for click handling (styled to be less prominent)
-    button_style = """
-    <style>
-    div.option-button-container .stButton > button {
-        min-height: 60px !important;
-        border-radius: 20px !important;
-        margin-top: -0.5rem !important;
-    }
-    </style>
-    """
+    button_style = '<style>div.option-button-container .stButton > button {min-height:60px !important;border-radius:20px !important;margin-top:-0.5rem !important;}</style>'
     st.markdown(button_style, unsafe_allow_html=True)
 
     clicked = st.button(
@@ -600,28 +546,12 @@ def render_progress_bar(
     """
     percentage = (current / total * 100) if total > 0 else 0
 
-    progress_html = f"""
-    <div style="margin: 1.5rem 0;">
-        {f'<div style="font-family: Fredoka, sans-serif; font-weight: 500; margin-bottom: 0.5rem; color: #374151;">{label}</div>' if label else ''}
-        <div class="progress-container" style="
-            background: #E5E7EB;
-            border-radius: 9999px;
-            height: 24px;
-            overflow: hidden;
-            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
-            position: relative;
-        ">
-            <div class="progress-bar" style="
-                height: 100%;
-                width: {percentage}%;
-                border-radius: 9999px;
-                background: linear-gradient(90deg, #4F46E5 0%, #818CF8 50%, #34D399 100%);
-                transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-            "></div>
-        </div>
-        {f'<div style="text-align: center; font-family: Fredoka, sans-serif; font-weight: 600; margin-top: 0.5rem; color: #4F46E5;">{current} / {total}</div>' if show_text else ''}
-    </div>
-    """
+    label_html = f'<div style="font-family:Fredoka,sans-serif;font-weight:500;margin-bottom:0.5rem;color:#374151;">{label}</div>' if label else ''
+    container_style = "background:#E5E7EB;border-radius:9999px;height:24px;overflow:hidden;box-shadow:inset 0 2px 4px rgba(0,0,0,0.1);position:relative;"
+    bar_style = f"height:100%;width:{percentage}%;border-radius:9999px;background:linear-gradient(90deg,#4F46E5 0%,#818CF8 50%,#34D399 100%);transition:width 0.5s cubic-bezier(0.4,0,0.2,1);"
+    text_html = f'<div style="text-align:center;font-family:Fredoka,sans-serif;font-weight:600;margin-top:0.5rem;color:#4F46E5;">{current} / {total}</div>' if show_text else ''
+    
+    progress_html = f'<div style="margin:1.5rem 0;">{label_html}<div class="progress-container" style="{container_style}"><div class="progress-bar" style="{bar_style}"></div></div>{text_html}</div>'
     st.markdown(progress_html, unsafe_allow_html=True)
 
 
@@ -645,45 +575,13 @@ def render_score_display(
         fire_count = min(streak, 5)
         fires = "🔥" * fire_count
         streak_class = "streak-fire" if streak >= 3 else ""
-        streak_html = f"""
-        <div class="{streak_class}" style="
-            font-family: 'Fredoka', sans-serif;
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: #FF6B35;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.5rem;
-            margin-top: 0.5rem;
-        ">
-            {fires} Streak: {streak}!
-        </div>
-        """
+        streak_style = "font-family:'Fredoka',sans-serif;font-size:1.5rem;font-weight:600;color:#FF6B35;display:flex;align-items:center;justify-content:center;gap:0.5rem;margin-top:0.5rem;"
+        streak_html = f'<div class="{streak_class}" style="{streak_style}">{fires} Streak: {streak}!</div>'
 
-    score_html = f"""
-    <div style="text-align: center; padding: 1rem;">
-        <div style="
-            font-family: 'Fredoka', sans-serif;
-            font-size: 3rem;
-            font-weight: 700;
-            background: linear-gradient(135deg, #4F46E5 0%, #818CF8 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        ">
-            {score} / {total}
-        </div>
-        <div style="
-            font-size: 1.2rem;
-            color: #6B7280;
-            font-family: 'Fredoka', sans-serif;
-        ">
-            Points
-        </div>
-        {streak_html}
-    </div>
-    """
+    score_style = "font-family:'Fredoka',sans-serif;font-size:3rem;font-weight:700;background:linear-gradient(135deg,#4F46E5 0%,#818CF8 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;"
+    label_style = "font-size:1.2rem;color:#6B7280;font-family:'Fredoka',sans-serif;"
+    
+    score_html = f'<div style="text-align:center;padding:1rem;"><div style="{score_style}">{score} / {total}</div><div style="{label_style}">Points</div>{streak_html}</div>'
     st.markdown(score_html, unsafe_allow_html=True)
 
 
@@ -702,20 +600,8 @@ def render_question_badge(question_type: str) -> None:
 
     label, bg = badges.get(question_type, ("?", "#6B7280"))
 
-    badge_html = f"""
-    <span style="
-        display: inline-block;
-        padding: 0.35rem 1rem;
-        border-radius: 9999px;
-        font-size: 0.85rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        background: {bg};
-        color: white;
-        font-family: 'Fredoka', sans-serif;
-    ">{label}</span>
-    """
+    badge_style = f"display:inline-block;padding:0.35rem 1rem;border-radius:9999px;font-size:0.85rem;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;background:{bg};color:white;font-family:'Fredoka',sans-serif;"
+    badge_html = f'<span style="{badge_style}">{label}</span>'
     st.markdown(badge_html, unsafe_allow_html=True)
 
 
@@ -784,46 +670,20 @@ def render_feedback(
         correct_answer: The correct answer (shown if wrong)
     """
     if is_correct:
-        feedback_html = f"""
-        <div class="feedback-correct bounce-in" style="
-            background: linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%);
-            border: 3px solid #34D399;
-            border-radius: 20px;
-            padding: 1.5rem;
-            text-align: center;
-            margin: 1rem 0;
-        ">
-            <div style="font-size: 3rem; margin-bottom: 0.5rem;">🎉</div>
-            <div style="
-                font-size: 1.5rem;
-                font-weight: 600;
-                color: #059669;
-                font-family: 'Fredoka', sans-serif;
-            ">Correct!</div>
-            {f'<div style="background: white; border-radius: 16px; padding: 1rem; margin-top: 1rem; border-left: 4px solid #4F46E5; text-align: left; font-family: Fredoka, sans-serif;"><strong>💡 Did you know?</strong> {explanation}</div>' if explanation else ''}
-        </div>
-        """
+        container_style = "background:linear-gradient(135deg,#D1FAE5 0%,#A7F3D0 100%);border:3px solid #34D399;border-radius:20px;padding:1.5rem;text-align:center;margin:1rem 0;"
+        emoji_style = "font-size:3rem;margin-bottom:0.5rem;"
+        title_style = "font-size:1.5rem;font-weight:600;color:#059669;font-family:'Fredoka',sans-serif;"
+        explanation_html = f'<div style="background:white;border-radius:16px;padding:1rem;margin-top:1rem;border-left:4px solid #4F46E5;text-align:left;font-family:Fredoka,sans-serif;"><strong>💡 Did you know?</strong> {explanation}</div>' if explanation else ''
+        
+        feedback_html = f'<div class="feedback-correct bounce-in" style="{container_style}"><div style="{emoji_style}">🎉</div><div style="{title_style}">Correct!</div>{explanation_html}</div>'
     else:
-        feedback_html = f"""
-        <div class="feedback-incorrect shake" style="
-            background: linear-gradient(135deg, #FEE2E2 0%, #FECACA 100%);
-            border: 3px solid #F87171;
-            border-radius: 20px;
-            padding: 1.5rem;
-            text-align: center;
-            margin: 1rem 0;
-        ">
-            <div style="font-size: 3rem; margin-bottom: 0.5rem;">😮</div>
-            <div style="
-                font-size: 1.5rem;
-                font-weight: 600;
-                color: #DC2626;
-                font-family: 'Fredoka', sans-serif;
-            ">Not quite!</div>
-            {f'<div style="margin-top: 0.5rem; color: #374151; font-family: Fredoka, sans-serif;"><strong>Correct answer:</strong> {correct_answer}</div>' if correct_answer else ''}
-            {f'<div style="background: white; border-radius: 16px; padding: 1rem; margin-top: 1rem; border-left: 4px solid #4F46E5; text-align: left; font-family: Fredoka, sans-serif;"><strong>📚 Learn:</strong> {explanation}</div>' if explanation else ''}
-        </div>
-        """
+        container_style = "background:linear-gradient(135deg,#FEE2E2 0%,#FECACA 100%);border:3px solid #F87171;border-radius:20px;padding:1.5rem;text-align:center;margin:1rem 0;"
+        emoji_style = "font-size:3rem;margin-bottom:0.5rem;"
+        title_style = "font-size:1.5rem;font-weight:600;color:#DC2626;font-family:'Fredoka',sans-serif;"
+        answer_html = f'<div style="margin-top:0.5rem;color:#374151;font-family:Fredoka,sans-serif;"><strong>Correct answer:</strong> {correct_answer}</div>' if correct_answer else ''
+        explanation_html = f'<div style="background:white;border-radius:16px;padding:1rem;margin-top:1rem;border-left:4px solid #4F46E5;text-align:left;font-family:Fredoka,sans-serif;"><strong>📚 Learn:</strong> {explanation}</div>' if explanation else ''
+        
+        feedback_html = f'<div class="feedback-incorrect shake" style="{container_style}"><div style="{emoji_style}">😮</div><div style="{title_style}">Not quite!</div>{answer_html}{explanation_html}</div>'
 
     st.markdown(feedback_html, unsafe_allow_html=True)
 
@@ -855,32 +715,7 @@ def render_celebration(score: int, total: int) -> None:
         message = "Keep practicing!"
         color = "#6B7280"
 
-    celebration_html = f"""
-    <div class="celebration-container bounce-in" style="text-align: center; padding: 3rem 1rem;">
-        <div style="font-size: 6rem; margin-bottom: 1rem;">{emoji}</div>
-        <h1 style="
-            font-family: 'Fredoka', sans-serif;
-            font-size: 2.5rem;
-            color: {color};
-            margin-bottom: 1rem;
-        ">{message}</h1>
-        <div style="
-            font-family: 'Fredoka', sans-serif;
-            font-size: 4rem;
-            font-weight: 700;
-            background: linear-gradient(135deg, #4F46E5 0%, #818CF8 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        ">{score}/{total}</div>
-        <div style="
-            font-family: 'Fredoka', sans-serif;
-            font-size: 1.5rem;
-            color: #6B7280;
-            margin-top: 0.5rem;
-        ">{percentage:.0f}% correct</div>
-    </div>
-    """
+    celebration_html = f'<div class="celebration-container bounce-in" style="text-align:center;padding:3rem 1rem;"><div style="font-size:6rem;margin-bottom:1rem;">{emoji}</div><h1 style="font-family:\'Fredoka\',sans-serif;font-size:2.5rem;color:{color};margin-bottom:1rem;">{message}</h1><div style="font-family:\'Fredoka\',sans-serif;font-size:4rem;font-weight:700;background:linear-gradient(135deg,#4F46E5 0%,#818CF8 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">{score}/{total}</div><div style="font-family:\'Fredoka\',sans-serif;font-size:1.5rem;color:#6B7280;margin-top:0.5rem;">{percentage:.0f}% correct</div></div>'
     st.markdown(celebration_html, unsafe_allow_html=True)
 
 
@@ -897,24 +732,12 @@ def render_empty_state(
         icon: Emoji icon
         action_text: Optional action hint
     """
-    empty_html = f"""
-    <div style="
-        text-align: center;
-        padding: 4rem 2rem;
-        background: white;
-        border-radius: 24px;
-        border: 3px dashed #E5E7EB;
-        margin: 2rem 0;
-    ">
-        <div style="font-size: 4rem; margin-bottom: 1rem; opacity: 0.7;">{icon}</div>
-        <div style="
-            font-size: 1.2rem;
-            color: #6B7280;
-            font-family: 'Fredoka', sans-serif;
-        ">{message}</div>
-        {f'<div style="font-size: 1rem; color: #9CA3AF; margin-top: 0.5rem; font-family: Fredoka, sans-serif;">{action_text}</div>' if action_text else ''}
-    </div>
-    """
+    container_style = "text-align:center;padding:4rem 2rem;background:white;border-radius:24px;border:3px dashed #E5E7EB;margin:2rem 0;"
+    icon_style = "font-size:4rem;margin-bottom:1rem;opacity:0.7;"
+    message_style = "font-size:1.2rem;color:#6B7280;font-family:'Fredoka',sans-serif;"
+    action_html = f'<div style="font-size:1rem;color:#9CA3AF;margin-top:0.5rem;font-family:Fredoka,sans-serif;">{action_text}</div>' if action_text else ''
+    
+    empty_html = f'<div style="{container_style}"><div style="{icon_style}">{icon}</div><div style="{message_style}">{message}</div>{action_html}</div>'
     st.markdown(empty_html, unsafe_allow_html=True)
 
 
@@ -941,25 +764,11 @@ def render_info_box(
     bg_color, text_color, default_icon = colors.get(variant, colors["info"])
     display_icon = icon if icon else default_icon
 
-    info_html = f"""
-    <div style="
-        background: {bg_color};
-        border-radius: 16px;
-        padding: 1rem 1.5rem;
-        margin: 1rem 0;
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        border-left: 4px solid {text_color};
-    ">
-        <div style="font-size: 1.5rem; flex-shrink: 0;">{display_icon}</div>
-        <div style="
-            font-family: 'Fredoka', sans-serif;
-            font-size: 1rem;
-            color: {text_color};
-        ">{message}</div>
-    </div>
-    """
+    box_style = f"background:{bg_color};border-radius:16px;padding:1rem 1.5rem;margin:1rem 0;display:flex;align-items:center;gap:1rem;border-left:4px solid {text_color};"
+    icon_style = "font-size:1.5rem;flex-shrink:0;"
+    text_style = f"font-family:'Fredoka',sans-serif;font-size:1rem;color:{text_color};"
+    
+    info_html = f'<div style="{box_style}"><div style="{icon_style}">{display_icon}</div><div style="{text_style}">{message}</div></div>'
     st.markdown(info_html, unsafe_allow_html=True)
 
 
@@ -978,28 +787,10 @@ def render_stat_card(
         icon: Optional emoji icon
         color: Accent color for the value
     """
-    stat_html = f"""
-    <div style="
-        background: white;
-        border-radius: 20px;
-        padding: 1.5rem;
-        text-align: center;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        min-height: 60px;
-    ">
-        {f'<div style="font-size: 2rem; margin-bottom: 0.5rem;">{icon}</div>' if icon else ''}
-        <div style="
-            font-family: 'Fredoka', sans-serif;
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: {color};
-        ">{value}</div>
-        <div style="
-            font-family: 'Fredoka', sans-serif;
-            font-size: 1rem;
-            color: #6B7280;
-            margin-top: 0.25rem;
-        ">{label}</div>
-    </div>
-    """
+    card_style = "background:white;border-radius:20px;padding:1.5rem;text-align:center;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);min-height:60px;"
+    icon_html = f'<div style="font-size:2rem;margin-bottom:0.5rem;">{icon}</div>' if icon else ''
+    value_style = f"font-family:'Fredoka',sans-serif;font-size:2.5rem;font-weight:700;color:{color};"
+    label_style = "font-family:'Fredoka',sans-serif;font-size:1rem;color:#6B7280;margin-top:0.25rem;"
+    
+    stat_html = f'<div style="{card_style}">{icon_html}<div style="{value_style}">{value}</div><div style="{label_style}">{label}</div></div>'
     st.markdown(stat_html, unsafe_allow_html=True)
