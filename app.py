@@ -365,6 +365,28 @@ def init_session_state():
 init_session_state()
 
 # ============================================
+# EARLY GAME CHECK - CRITICAL FOR STATE MANAGEMENT
+# ============================================
+# This check MUST happen at the top, BEFORE any other UI is rendered.
+# If a game is active, we skip straight to the game engine and prevent
+# the lobby from loading (which would cause state reset issues).
+
+def check_and_run_game():
+    """
+    Check if game should be running and render it immediately.
+    Returns True if game was rendered, False if we should continue to lobby.
+    """
+    # First priority: Check if game is completed (show results)
+    if st.session_state.get('game_completed', False):
+        return 'results'
+
+    # Second priority: Check if game is actively running
+    if st.session_state.get('game_active', False) and st.session_state.get('quiz_data') is not None:
+        return 'game'
+
+    return None
+
+# ============================================
 # HELPER FUNCTIONS
 # ============================================
 def reset_to_home():
@@ -373,11 +395,25 @@ def reset_to_home():
         del st.session_state[key]
     init_session_state()
 
-def reset_game():
-    """Reset game state only."""
+def reset_game_state():
+    """Reset game state variables only (does NOT touch game_active flag)."""
     st.session_state.current_question_index = 0
     st.session_state.score = 0
-    st.session_state.game_active = False
+    st.session_state.user_answer = None
+    st.session_state.answer_submitted = False
+    st.session_state.wrong_answers = []
+    st.session_state.game_completed = False
+    # Clear any scored/tracked attributes
+    for key in list(st.session_state.keys()):
+        if key.startswith('scored_') or key.startswith('tracked_'):
+            del st.session_state[key]
+
+def start_game(quiz_data):
+    """Properly start a game with the given quiz data."""
+    st.session_state.quiz_data = quiz_data
+    st.session_state.game_active = True
+    st.session_state.current_question_index = 0
+    st.session_state.score = 0
     st.session_state.user_answer = None
     st.session_state.answer_submitted = False
     st.session_state.wrong_answers = []
@@ -985,10 +1021,8 @@ def render_cms_ready():
 
         st.markdown("#### 🎮 Or Play Now")
         if st.button("🎮 Start Playing!", type="primary", use_container_width=True):
-            st.session_state.quiz_data = quiz
-            st.session_state.app_mode = 'game'
-            st.session_state.game_active = True
-            reset_game()
+            # Use start_game() to properly initialize all game state
+            start_game(quiz)
             st.rerun()
 
     st.write("")
@@ -1050,10 +1084,8 @@ def render_play_mode():
             col1, col2, col3 = st.columns([1, 2, 1])
             with col2:
                 if st.button("🚀 Start Game!", type="primary", use_container_width=True):
-                    st.session_state.quiz_data = quiz_data
-                    st.session_state.app_mode = 'game'
-                    st.session_state.game_active = True
-                    reset_game()
+                    # Use start_game() to properly initialize all game state
+                    start_game(quiz_data)
                     st.rerun()
 
         except json.JSONDecodeError:
@@ -1349,7 +1381,8 @@ def render_results_screen():
 
     with col1:
         if st.button("🔄 Play Again", use_container_width=True):
-            reset_game()
+            # Reset game state and set active - quiz_data is already in session
+            reset_game_state()
             st.session_state.game_active = True
             st.rerun()
 
@@ -1379,27 +1412,25 @@ def render_results_screen():
 def main():
     """Main app router - determines which screen to show."""
 
-    # Check if game is completed first
-    if st.session_state.game_completed:
+    # CRITICAL: Check game state FIRST before any lobby UI loads
+    # This prevents the state reset loop when transitioning to game mode
+    game_state = check_and_run_game()
+
+    if game_state == 'results':
         render_results_screen()
         return
 
-    # Check if actively playing
-    if st.session_state.game_active and st.session_state.quiz_data:
+    if game_state == 'game':
         render_game_screen()
         return
 
-    # Route based on app mode
+    # No active game - render the lobby/menu screens
     if st.session_state.app_mode == 'home':
         render_home_screen()
     elif st.session_state.app_mode == 'create':
         render_create_mode()
     elif st.session_state.app_mode == 'play':
         render_play_mode()
-    elif st.session_state.app_mode == 'game':
-        # If game mode but not active, something went wrong - reset
-        reset_to_home()
-        st.rerun()
 
 # Run the app
 if __name__ == "__main__":
