@@ -19,6 +19,7 @@ Author: CIFE Educational Technology
 import streamlit as st
 import pandas as pd
 import json
+import os
 from typing import Optional
 
 # =============================================================================
@@ -235,58 +236,34 @@ def render_sidebar():
 
         st.divider()
 
-        # API Key input
-        render_info_box("Enter your OpenAI API Key below", variant="info", icon="🔑")
+                # API Key (prefer Streamlit secrets / env; allow optional override)
+        default_key = ""
+        try:
+            default_key = st.secrets.get("OPENAI_API_KEY", "")
+        except Exception:
+            default_key = ""
+        default_key = default_key or os.getenv("OPENAI_API_KEY", "")
 
-        api_key = st.text_input(
-            "API Key",
-            type="password",
-            key="openai_api_key",
-            help="Required for image analysis and quiz generation",
-            label_visibility="collapsed"
-        )
+        with st.expander("🔑 API Key", expanded=not bool(default_key)):
+            api_key_override = st.text_input(
+                "API Key",
+                type="password",
+                key="openai_api_key_override",
+                help="Optional override. Recommended: set OPENAI_API_KEY in Streamlit Secrets.",
+                label_visibility="collapsed",
+                placeholder=("Using Streamlit Secrets" if default_key else "Paste OpenAI API key here")
+            )
+
+        api_key = (api_key_override or default_key).strip()
 
         if api_key:
-            render_info_box("API Key configured", variant="success", icon="✓")
+            if api_key_override:
+                render_info_box("Using override API key", variant="success", icon="🔐")
+            else:
+                render_info_box("API key loaded from secrets", variant="success", icon="🔐")
         else:
-            render_info_box("API Key required to proceed", variant="warning", icon="⚠️")
-
-        st.divider()
-
-        # Settings section
-        st.markdown("### ⚙️ Settings")
-
-        st.session_state.sound_enabled = st.toggle(
-            "🔊 Sound Effects",
-            value=st.session_state.sound_enabled
-        )
-
-        st.session_state.animations_enabled = st.toggle(
-            "✨ Animations",
-            value=st.session_state.animations_enabled
-        )
-
-        st.session_state.teacher_mode = st.toggle(
-            "👩‍🏫 Teacher Mode",
-            value=st.session_state.teacher_mode,
-            help="Show debug information and advanced options"
-        )
-
-        st.divider()
-
-        # Debug info (Teacher Mode - Human-in-the-Loop visibility)
-        if st.session_state.teacher_mode:
-            render_info_box("Debug Mode Active", variant="warning", icon="🔧")
-            st.json({
-                "game_mode": st.session_state.game_mode,
-                "wizard_step": st.session_state.wizard_step,
-                "score": st.session_state.score,
-                "streak": st.session_state.streak,
-                "current_question": st.session_state.current_question_index,
-                "total_questions": len(st.session_state.quiz_data)
-            })
-
-        # Reset button
+            render_info_box("API key required to proceed (set OPENAI_API_KEY in Streamlit Secrets)", variant="warning", icon="⚠️")
+# Reset button
         st.divider()
         if st.button("🔄 Start Over", use_container_width=True):
             reset_to_setup()
