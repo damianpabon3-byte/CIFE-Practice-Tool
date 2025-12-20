@@ -10,6 +10,109 @@ import json
 # Configure the OpenAI client with API key from Streamlit secrets
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
+# ============================================
+# CIFE BRAND THEME - Custom CSS Styling
+# ============================================
+st.markdown("""
+    <style>
+    /* Import Fredoka font from Google Fonts */
+    @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap');
+
+    /* Top border accent in Brand Pink */
+    .stApp {
+        border-top: 5px solid #E04F80;
+    }
+
+    /* Apply Fredoka font to all headers */
+    h1, h2, h3, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+        font-family: 'Fredoka', sans-serif !important;
+    }
+
+    /* Main Title (h1) in Brand Pink */
+    h1, .stMarkdown h1 {
+        color: #E04F80 !important;
+    }
+
+    /* Subheaders (h2, h3) in Brand Pink */
+    h2, h3, .stMarkdown h2, .stMarkdown h3 {
+        color: #E04F80 !important;
+    }
+
+    /* Primary Button styling - Teal with rounded corners */
+    .stButton > button[kind="primary"],
+    .stButton > button[data-testid="baseButton-primary"] {
+        background-color: #2AB7CA !important;
+        border-color: #2AB7CA !important;
+        border-radius: 20px !important;
+        font-family: 'Fredoka', sans-serif !important;
+        font-weight: 500 !important;
+        padding: 0.5rem 2rem !important;
+        transition: all 0.3s ease !important;
+    }
+
+    .stButton > button[kind="primary"]:hover,
+    .stButton > button[data-testid="baseButton-primary"]:hover {
+        background-color: #229AA8 !important;
+        border-color: #229AA8 !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 4px 12px rgba(42, 183, 202, 0.4) !important;
+    }
+
+    /* Success messages in Lime Green */
+    .stSuccess, .stAlert[data-baseweb="notification"][kind="positive"] {
+        background-color: rgba(155, 197, 61, 0.15) !important;
+        border-left-color: #9BC53D !important;
+    }
+
+    .stSuccess > div {
+        color: #7A9E2E !important;
+    }
+
+    /* Style success text elements */
+    [data-testid="stNotification"][data-kind="success"] {
+        background-color: rgba(155, 197, 61, 0.15) !important;
+        border-left: 4px solid #9BC53D !important;
+    }
+
+    /* Download button accent */
+    .stDownloadButton > button {
+        background-color: #9BC53D !important;
+        border-color: #9BC53D !important;
+        border-radius: 20px !important;
+        font-family: 'Fredoka', sans-serif !important;
+        font-weight: 500 !important;
+        color: white !important;
+    }
+
+    .stDownloadButton > button:hover {
+        background-color: #8AB534 !important;
+        border-color: #8AB534 !important;
+    }
+
+    /* File uploader styling */
+    [data-testid="stFileUploader"] {
+        border-radius: 15px !important;
+    }
+
+    /* Expander header styling */
+    .streamlit-expanderHeader {
+        font-family: 'Fredoka', sans-serif !important;
+        color: #2AB7CA !important;
+    }
+
+    /* Info box styling */
+    .stInfo {
+        background-color: rgba(42, 183, 202, 0.1) !important;
+        border-left-color: #2AB7CA !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# ============================================
+# LOGO - Display at the top
+# ============================================
+st.image("logo.png", width=200)
+
 # App title and description
 st.title("Teacher's Assistant")
 st.write("Upload multiple photos of a student's notebook pages (e.g., 3-5 pages covering a whole topic) to generate a comprehensive practice quiz.")
@@ -250,7 +353,7 @@ REQUIREMENTS:
 
                 # Download button for the Word document
                 st.download_button(
-                    label="📥 Download Practice Quiz (Word Document)",
+                    label="Download Practice Quiz (Word Document)",
                     data=buffer,
                     file_name=filename,
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -269,4 +372,4 @@ REQUIREMENTS:
                 st.json(quiz_data)
 else:
     # Show instructions when no files are uploaded
-    st.info("👆 Upload one or more notebook page images to get started. For best results, upload all pages covering a complete topic.")
+    st.info("Upload one or more notebook page images to get started. For best results, upload all pages covering a complete topic.")
