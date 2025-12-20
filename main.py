@@ -1,15 +1,17 @@
 """
-CIFE Edu-Suite - Main Application
-===================================
+CIFE Edu-Suite - Main Application Router
+=========================================
 A production-ready Streamlit application for generating gamified,
 interactive quizzes from student notebook photos.
 
-Workflow:
-1. Upload: Teacher uploads notebook image(s)
-2. Analyze: GPT-4o Vision transcribes and identifies content
-3. Generate: GPT-4o creates pedagogical quiz questions
-4. Edit: Human-in-the-loop review with st.data_editor
-5. Action: Play interactive game or download PDF/DOCX
+This file acts as a strict Router and State Manager that delegates
+all visual rendering to the specialized UI module (modules/ui_components.py).
+
+Wizard Workflow (4-Step Linear Path):
+1. Ingestion: Teacher uploads notebook image(s)
+2. Extraction: GPT-4o Vision transcribes and identifies content
+3. Editor: Human-in-the-Loop review with st.data_editor
+4. Publication/Play: Interactive game or download PDF/DOCX
 
 Author: CIFE Educational Technology
 """
@@ -19,7 +21,9 @@ import pandas as pd
 import json
 from typing import Optional
 
-# Import custom modules
+# =============================================================================
+# Import UI Components - Strict alignment with modules/ui_components.py
+# =============================================================================
 from modules.ui_components import (
     load_custom_css,
     render_header,
@@ -29,8 +33,14 @@ from modules.ui_components import (
     render_question_badge,
     render_feedback,
     render_celebration,
-    render_empty_state
+    render_empty_state,
+    render_card,
+    render_info_box,
+    render_stat_card,
+    render_option_card,
+    render_card_button
 )
+
 from modules.vision_processor import analyze_notebook_image, analyze_multiple_images
 from modules.content_generator import (
     generate_quiz,
@@ -57,9 +67,9 @@ from modules.exporter import (
 )
 
 
-# ============================================
+# =============================================================================
 # Page Configuration
-# ============================================
+# =============================================================================
 st.set_page_config(
     page_title="CIFE Edu-Suite",
     page_icon="📚",
@@ -68,19 +78,30 @@ st.set_page_config(
 )
 
 
-# ============================================
+# =============================================================================
+# Wizard Step Constants - 4-Step Linear Path
+# =============================================================================
+WIZARD_STEPS = ["Ingestion", "Extraction", "Editor", "Play"]
+STEP_INGESTION = "ingestion"
+STEP_EXTRACTION = "extraction"
+STEP_EDITOR = "editor"
+STEP_PLAY = "play"
+STEP_RESULTS = "results"
+
+
+# =============================================================================
 # Session State Initialization
-# ============================================
+# =============================================================================
 def init_session_state():
-    """Initialize all session state variables."""
+    """Initialize all session state variables for state persistence."""
 
     # Game mode: "setup" or "play"
     if "game_mode" not in st.session_state:
         st.session_state.game_mode = "setup"
 
-    # Wizard step: "upload", "analyze", "edit", "action", "play", "results"
+    # Wizard step: follows 4-step linear path
     if "wizard_step" not in st.session_state:
-        st.session_state.wizard_step = "upload"
+        st.session_state.wizard_step = STEP_INGESTION
 
     # Score tracking
     if "score" not in st.session_state:
@@ -145,7 +166,7 @@ def init_session_state():
     if "sa_count" not in st.session_state:
         st.session_state.sa_count = 2
 
-    # Teacher mode (debug)
+    # Teacher mode (Human-in-the-Loop)
     if "teacher_mode" not in st.session_state:
         st.session_state.teacher_mode = False
 
@@ -157,10 +178,22 @@ def init_session_state():
         st.session_state.animations_enabled = True
 
 
+def get_current_step_index() -> int:
+    """Get the current wizard step index for visual progress."""
+    step_mapping = {
+        STEP_INGESTION: 0,
+        STEP_EXTRACTION: 1,
+        STEP_EDITOR: 2,
+        STEP_PLAY: 3,
+        STEP_RESULTS: 3
+    }
+    return step_mapping.get(st.session_state.wizard_step, 0)
+
+
 def reset_to_setup():
-    """Reset all state and return to setup mode."""
+    """Reset all state and return to setup mode (Ingestion step)."""
     st.session_state.game_mode = "setup"
-    st.session_state.wizard_step = "upload"
+    st.session_state.wizard_step = STEP_INGESTION
     st.session_state.score = 0
     st.session_state.streak = 0
     st.session_state.max_streak = 0
@@ -178,7 +211,7 @@ def reset_to_setup():
 def start_game():
     """Transition from setup to play mode."""
     st.session_state.game_mode = "play"
-    st.session_state.wizard_step = "play"
+    st.session_state.wizard_step = STEP_PLAY
     st.session_state.current_question_index = 0
     st.session_state.score = 0
     st.session_state.streak = 0
@@ -187,40 +220,40 @@ def start_game():
     st.session_state.answer_submitted = False
 
 
-# ============================================
-# Sidebar Configuration
-# ============================================
+# =============================================================================
+# Sidebar Configuration (Rendered via UI components)
+# =============================================================================
 def render_sidebar():
     """Render the sidebar with API key input and settings."""
 
     with st.sidebar:
-        st.markdown("""
-        <div style="text-align: center; padding: 1rem 0;">
-            <h1 style="color: white; font-family: 'Fredoka', sans-serif; font-size: 1.8rem;">
-                📚 CIFE Edu-Suite
-            </h1>
-        </div>
-        """, unsafe_allow_html=True)
+        # Sidebar header - delegated to UI component pattern
+        render_card(
+            content='<p style="margin: 0; font-size: 0.9rem; color: #6B7280;">Gamified Quiz Generator</p>',
+            title="📚 CIFE Edu-Suite"
+        )
 
         st.divider()
 
         # API Key input
-        st.markdown("### 🔑 OpenAI API Key")
+        render_info_box("Enter your OpenAI API Key below", variant="info", icon="🔑")
+
         api_key = st.text_input(
-            "Enter your API key",
+            "API Key",
             type="password",
             key="openai_api_key",
-            help="Required for image analysis and quiz generation"
+            help="Required for image analysis and quiz generation",
+            label_visibility="collapsed"
         )
 
         if api_key:
-            st.success("✓ API Key set")
+            render_info_box("API Key configured", variant="success", icon="✓")
         else:
-            st.warning("⚠️ API Key required")
+            render_info_box("API Key required to proceed", variant="warning", icon="⚠️")
 
         st.divider()
 
-        # Settings
+        # Settings section
         st.markdown("### ⚙️ Settings")
 
         st.session_state.sound_enabled = st.toggle(
@@ -241,9 +274,9 @@ def render_sidebar():
 
         st.divider()
 
-        # Debug info (Teacher Mode)
+        # Debug info (Teacher Mode - Human-in-the-Loop visibility)
         if st.session_state.teacher_mode:
-            st.markdown("### 🔧 Debug Info")
+            render_info_box("Debug Mode Active", variant="warning", icon="🔧")
             st.json({
                 "game_mode": st.session_state.game_mode,
                 "wizard_step": st.session_state.wizard_step,
@@ -262,11 +295,11 @@ def render_sidebar():
         return api_key
 
 
-# ============================================
-# Upload Step
-# ============================================
-def render_upload_step(api_key: str):
-    """Render the image upload step."""
+# =============================================================================
+# Step 1: Ingestion (Upload)
+# =============================================================================
+def render_ingestion_step(api_key: str):
+    """Render the image upload (Ingestion) step."""
 
     render_header(
         "Upload Notebook Photos",
@@ -274,28 +307,20 @@ def render_upload_step(api_key: str):
         "📷"
     )
 
-    render_wizard_steps(
-        ["Upload", "Analyze", "Edit", "Action"],
-        current_step=0
-    )
+    render_wizard_steps(WIZARD_STEPS, current_step=0)
 
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        st.markdown("""
-        <div style="
-            background: white;
-            border-radius: 20px;
-            padding: 2rem;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        ">
-            <h3 style="margin-top: 0; font-family: 'Fredoka', sans-serif;">📸 Upload Images</h3>
-            <p style="color: #6B7280;">
+        render_card(
+            content="""
+            <p style="color: #6B7280; margin: 0;">
                 Upload photos of handwritten student notebooks. Our AI will analyze
                 the content and generate personalized practice questions.
             </p>
-        </div>
-        """, unsafe_allow_html=True)
+            """,
+            title="📸 Upload Images"
+        )
 
         uploaded_files = st.file_uploader(
             "Choose notebook images",
@@ -306,7 +331,11 @@ def render_upload_step(api_key: str):
 
         if uploaded_files:
             st.session_state.uploaded_files = uploaded_files
-            st.success(f"✓ {len(uploaded_files)} image(s) uploaded")
+            render_info_box(
+                f"{len(uploaded_files)} image(s) uploaded successfully",
+                variant="success",
+                icon="✓"
+            )
 
             # Show previews
             cols = st.columns(min(len(uploaded_files), 4))
@@ -315,26 +344,20 @@ def render_upload_step(api_key: str):
                     st.image(file, caption=f"Image {i+1}", use_container_width=True)
 
     with col2:
-        st.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%);
-            border-radius: 20px;
-            padding: 1.5rem;
-            border: 2px solid #C7D2FE;
-        ">
-            <h4 style="margin-top: 0; color: #4F46E5;">💡 Tips for best results</h4>
-            <ul style="color: #4338CA; padding-left: 1.2rem;">
+        render_card(
+            content="""
+            <ul style="color: #4338CA; padding-left: 1.2rem; margin: 0;">
                 <li>Use good lighting</li>
                 <li>Keep camera steady</li>
                 <li>Include full page</li>
                 <li>Avoid shadows</li>
             </ul>
-        </div>
-        """, unsafe_allow_html=True)
+            """,
+            title="💡 Tips for best results",
+            variant="warning"
+        )
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Next button
+    # Next button - triggers visual update of progress circles
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         if st.button(
@@ -342,15 +365,15 @@ def render_upload_step(api_key: str):
             use_container_width=True,
             disabled=not uploaded_files or not api_key
         ):
-            st.session_state.wizard_step = "analyze"
+            st.session_state.wizard_step = STEP_EXTRACTION
             st.rerun()
 
 
-# ============================================
-# Analyze Step
-# ============================================
-def render_analyze_step(api_key: str):
-    """Render the analysis step with progress."""
+# =============================================================================
+# Step 2: Extraction (Analyze)
+# =============================================================================
+def render_extraction_step(api_key: str):
+    """Render the analysis (Extraction) step with progress."""
 
     render_header(
         "Analyzing Notebook",
@@ -358,15 +381,13 @@ def render_analyze_step(api_key: str):
         "🔍"
     )
 
-    render_wizard_steps(
-        ["Upload", "Analyze", "Edit", "Action"],
-        current_step=1
-    )
+    render_wizard_steps(WIZARD_STEPS, current_step=1)
 
     with st.spinner("Analyzing images..."):
         try:
             progress_placeholder = st.empty()
-            progress_placeholder.info("📖 Reading handwriting...")
+            with progress_placeholder.container():
+                render_info_box("Reading handwriting...", variant="info", icon="📖")
 
             # Analyze images
             if len(st.session_state.uploaded_files) == 1:
@@ -384,17 +405,17 @@ def render_analyze_step(api_key: str):
             st.session_state.quiz_subject = analysis.get("subject", "General")
             st.session_state.quiz_grade = analysis.get("detected_grade_level", "5")
 
-            progress_placeholder.success("✅ Analysis complete!")
+            progress_placeholder.empty()
+            render_info_box("Analysis complete!", variant="success", icon="✅")
 
-            # Show analysis results
+            # Show analysis results using render_card
             col1, col2 = st.columns(2)
 
             with col1:
-                st.markdown("""
-                <div style="background: white; border-radius: 16px; padding: 1.5rem;">
-                    <h4 style="margin-top: 0;">📝 Transcribed Text</h4>
-                </div>
-                """, unsafe_allow_html=True)
+                render_card(
+                    content="",
+                    title="📝 Transcribed Text"
+                )
                 st.text_area(
                     "Transcription",
                     value=analysis.get("transcribed_text", ""),
@@ -403,24 +424,26 @@ def render_analyze_step(api_key: str):
                 )
 
             with col2:
-                st.markdown(f"""
-                <div style="background: white; border-radius: 16px; padding: 1.5rem;">
-                    <h4 style="margin-top: 0;">📊 Analysis Results</h4>
-                    <p><strong>Subject:</strong> {analysis.get("subject", "Unknown")}</p>
-                    <p><strong>Grade Level:</strong> {analysis.get("detected_grade_level", "Unknown")}</p>
-                    <p><strong>Core Concept:</strong> {analysis.get("core_concept", "Unknown")}</p>
-                    <p><strong>Language:</strong> {analysis.get("language", "Unknown")}</p>
-                </div>
-                """, unsafe_allow_html=True)
+                analysis_content = f"""
+                <p><strong>Subject:</strong> {analysis.get("subject", "Unknown")}</p>
+                <p><strong>Grade Level:</strong> {analysis.get("detected_grade_level", "Unknown")}</p>
+                <p><strong>Core Concept:</strong> {analysis.get("core_concept", "Unknown")}</p>
+                <p><strong>Language:</strong> {analysis.get("language", "Unknown")}</p>
+                """
+                render_card(
+                    content=analysis_content,
+                    title="📊 Analysis Results"
+                )
 
                 if analysis.get("key_terms"):
-                    st.markdown("**Key Terms:**")
-                    st.write(", ".join(analysis.get("key_terms", [])))
-
-            st.markdown("<br>", unsafe_allow_html=True)
+                    key_terms = ", ".join(analysis.get("key_terms", []))
+                    render_info_box(f"Key Terms: {key_terms}", variant="info", icon="🏷️")
 
             # Question configuration
-            st.markdown("### 📝 Quiz Configuration")
+            render_card(
+                content="<p style='margin:0; color:#6B7280;'>Configure the number of questions to generate</p>",
+                title="📝 Quiz Configuration"
+            )
 
             col1, col2, col3 = st.columns(3)
 
@@ -449,14 +472,14 @@ def render_analyze_step(api_key: str):
                 )
 
             total = st.session_state.mc_count + st.session_state.tf_count + st.session_state.sa_count
-            st.info(f"Total questions: {total}")
+            render_info_box(f"Total questions: {total}", variant="info", icon="📊")
 
             # Navigation buttons
             col1, col2, col3 = st.columns([1, 1, 1])
 
             with col1:
-                if st.button("← Back to Upload"):
-                    st.session_state.wizard_step = "upload"
+                if st.button("← Back to Ingestion"):
+                    st.session_state.wizard_step = STEP_INGESTION
                     st.rerun()
 
             with col3:
@@ -476,47 +499,44 @@ def render_analyze_step(api_key: str):
                         )
                         st.session_state.quiz_data = questions
                         st.session_state.quiz_df = quiz_to_dataframe(questions)
-                        st.session_state.wizard_step = "edit"
+                        st.session_state.wizard_step = STEP_EDITOR
                         st.rerun()
 
         except Exception as e:
-            st.error(f"❌ Analysis failed: {str(e)}")
+            render_info_box(f"Analysis failed: {str(e)}", variant="error", icon="❌")
             if st.button("← Try Again"):
-                st.session_state.wizard_step = "upload"
+                st.session_state.wizard_step = STEP_INGESTION
                 st.rerun()
 
 
-# ============================================
-# Edit Step (Human-in-the-Loop)
-# ============================================
-def render_edit_step():
-    """Render the question editing step."""
+# =============================================================================
+# Step 3: Editor (Human-in-the-Loop)
+# =============================================================================
+def render_editor_step():
+    """
+    Render the question editing step with Human-in-the-Loop st.data_editor.
+    Teacher Mode: Content verification before Play mode begins.
+    """
 
     render_header(
         "Review & Edit Questions",
-        "Make any changes before starting the quiz",
+        "Human-in-the-Loop: Verify content before the quiz",
         "✏️"
     )
 
-    render_wizard_steps(
-        ["Upload", "Analyze", "Edit", "Action"],
-        current_step=2
+    render_wizard_steps(WIZARD_STEPS, current_step=2)
+
+    render_card(
+        content="""
+        <p style="margin: 0;">
+            <strong>👩‍🏫 Teacher Review:</strong> Edit questions, fix errors, or adjust difficulty below.
+            Double-click any cell to edit. This is your Human-in-the-Loop checkpoint.
+        </p>
+        """,
+        variant="warning"
     )
 
-    st.markdown("""
-    <div style="
-        background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);
-        border-radius: 16px;
-        padding: 1rem 1.5rem;
-        border: 2px solid #FBBF24;
-        margin-bottom: 1.5rem;
-    ">
-        <strong>👩‍🏫 Teacher Review:</strong> Edit questions, fix errors, or adjust difficulty below.
-        Double-click any cell to edit.
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Data editor for questions
+    # Data editor for questions - Human-in-the-Loop verification
     if st.session_state.quiz_df is not None:
         edited_df = st.data_editor(
             st.session_state.quiz_df,
@@ -545,8 +565,6 @@ def render_edit_step():
         st.session_state.quiz_df = edited_df
         st.session_state.quiz_data = dataframe_to_quiz(edited_df)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
     # Quiz title input
     st.session_state.quiz_title = st.text_input(
         "Quiz Title",
@@ -558,21 +576,22 @@ def render_edit_step():
     col1, col2, col3 = st.columns([1, 1, 1])
 
     with col1:
-        if st.button("← Back"):
-            st.session_state.wizard_step = "analyze"
+        if st.button("← Back to Extraction"):
+            st.session_state.wizard_step = STEP_EXTRACTION
             st.rerun()
 
     with col3:
-        if st.button("Continue →", use_container_width=True):
-            st.session_state.wizard_step = "action"
+        if st.button("Continue to Play →", use_container_width=True):
+            st.session_state.wizard_step = STEP_PLAY
+            st.session_state.game_mode = "setup"
             st.rerun()
 
 
-# ============================================
-# Action Step (Play or Download)
-# ============================================
+# =============================================================================
+# Step 4: Publication/Play (Action Selection)
+# =============================================================================
 def render_action_step():
-    """Render the action selection step."""
+    """Render the action selection step (Publication or Play)."""
 
     render_header(
         "Quiz Ready!",
@@ -580,58 +599,38 @@ def render_action_step():
         "🎮"
     )
 
-    render_wizard_steps(
-        ["Upload", "Analyze", "Edit", "Action"],
-        current_step=3
-    )
+    render_wizard_steps(WIZARD_STEPS, current_step=3)
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%);
-            border-radius: 24px;
-            padding: 2rem;
-            text-align: center;
-            border: 3px solid #34D399;
-            height: 300px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        ">
-            <div style="font-size: 4rem;">🎮</div>
-            <h2 style="color: #059669; font-family: 'Fredoka', sans-serif;">Play Game</h2>
-            <p style="color: #047857;">Interactive quiz with scoring, streaks, and celebrations!</p>
-        </div>
-        """, unsafe_allow_html=True)
+        render_card(
+            content="""
+            <div style="text-align: center;">
+                <div style="font-size: 4rem;">🎮</div>
+                <h2 style="color: #059669; font-family: 'Fredoka', sans-serif; margin: 0.5rem 0;">Play Game</h2>
+                <p style="color: #047857; margin: 0;">Interactive quiz with scoring, streaks, and celebrations!</p>
+            </div>
+            """,
+            variant="success"
+        )
 
         if st.button("🎮 Start Playing", use_container_width=True, key="play_btn"):
             start_game()
             st.rerun()
 
     with col2:
-        st.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%);
-            border-radius: 24px;
-            padding: 2rem;
-            text-align: center;
-            border: 3px solid #818CF8;
-            height: 300px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        ">
-            <div style="font-size: 4rem;">📄</div>
-            <h2 style="color: #4F46E5; font-family: 'Fredoka', sans-serif;">Download</h2>
-            <p style="color: #4338CA;">Get PDF or Word document for printing</p>
-        </div>
-        """, unsafe_allow_html=True)
+        render_card(
+            content="""
+            <div style="text-align: center;">
+                <div style="font-size: 4rem;">📄</div>
+                <h2 style="color: #4F46E5; font-family: 'Fredoka', sans-serif; margin: 0.5rem 0;">Download</h2>
+                <p style="color: #4338CA; margin: 0;">Get PDF or Word document for printing</p>
+            </div>
+            """
+        )
 
         # Download options
-        st.markdown("<br>", unsafe_allow_html=True)
-
         dcol1, dcol2 = st.columns(2)
 
         with dcol1:
@@ -705,16 +704,15 @@ def render_action_step():
             )
 
     # Back button
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("← Back to Edit"):
-        st.session_state.wizard_step = "edit"
+    if st.button("← Back to Editor"):
+        st.session_state.wizard_step = STEP_EDITOR
         st.rerun()
 
 
-# ============================================
-# Play Step (Interactive Game)
-# ============================================
-def render_play_step():
+# =============================================================================
+# Interactive Play Mode
+# =============================================================================
+def render_play_mode():
     """Render the interactive quiz game."""
 
     quiz_data = st.session_state.quiz_data
@@ -722,13 +720,13 @@ def render_play_step():
     total_questions = len(quiz_data)
 
     if current_idx >= total_questions:
-        st.session_state.wizard_step = "results"
+        st.session_state.wizard_step = STEP_RESULTS
         st.rerun()
         return
 
     current_q = quiz_data[current_idx]
 
-    # Header with score
+    # Header with score display - delegated to UI component
     col1, col2, col3 = st.columns([1, 2, 1])
 
     with col1:
@@ -747,22 +745,13 @@ def render_play_step():
         )
 
     with col3:
-        # Streak message
+        # Streak message - rendered via UI component
         if st.session_state.streak > 0:
-            st.markdown(f"""
-            <div style="
-                text-align: center;
-                padding: 1rem;
-                background: linear-gradient(135deg, #FF6B35 0%, #FF9F1C 100%);
-                border-radius: 16px;
-                color: white;
-                font-family: 'Fredoka', sans-serif;
-            ">
-                {get_streak_message(st.session_state.streak)}
-            </div>
-            """, unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
+            streak_msg = get_streak_message(st.session_state.streak)
+            render_card(
+                content=f'<div style="text-align: center; font-size: 1.1rem;">{streak_msg}</div>',
+                variant="warning"
+            )
 
     # Question card
     q_type = current_q.get("question_type", "multiple_choice")
@@ -772,29 +761,13 @@ def render_play_step():
     if q_type == "short_answer":
         q_text = create_smart_blank(q_text, current_q.get("correct_answer", ""))
 
-    st.markdown(f"""
-    <div style="
-        background: white;
-        border-radius: 24px;
-        padding: 2rem;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-        margin-bottom: 2rem;
-    ">
-        <div style="margin-bottom: 1rem;">
-    """, unsafe_allow_html=True)
-
+    # Render question badge via UI component
     render_question_badge(q_type)
 
-    st.markdown(f"""
-        </div>
-        <h2 style="
-            font-family: 'Fredoka', sans-serif;
-            font-size: 1.5rem;
-            color: #1F2937;
-            margin: 0;
-        ">{q_text}</h2>
-    </div>
-    """, unsafe_allow_html=True)
+    # Question text in card
+    render_card(
+        content=f'<h2 style="font-family: \'Fredoka\', sans-serif; font-size: 1.5rem; color: #1F2937; margin: 0;">{q_text}</h2>'
+    )
 
     # Answer options based on type
     if not st.session_state.answer_submitted:
@@ -805,7 +778,7 @@ def render_play_step():
         else:
             render_sa_input(current_q)
     else:
-        # Show feedback
+        # Show feedback via UI component
         is_correct = check_answer(
             st.session_state.selected_answer,
             current_q.get("correct_answer_index", 0),
@@ -836,15 +809,14 @@ def render_play_step():
                     st.rerun()
             else:
                 if st.button("🏆 See Results", use_container_width=True):
-                    st.session_state.wizard_step = "results"
+                    st.session_state.wizard_step = STEP_RESULTS
                     st.rerun()
 
 
 def render_mc_options(question: dict):
-    """Render multiple choice options."""
+    """Render multiple choice options using UI components."""
     options = question.get("options", [])
     labels = ["A", "B", "C", "D"]
-    colors = ["#4F46E5", "#059669", "#DC2626", "#D97706"]
 
     col1, col2 = st.columns(2)
 
@@ -894,7 +866,7 @@ def render_sa_input(question: dict):
 
 
 def process_answer(question: dict, selected_idx: int, user_text: str = ""):
-    """Process the submitted answer."""
+    """Process the submitted answer and update score/streak."""
     q_type = question.get("question_type", "multiple_choice")
 
     is_correct = check_answer(
@@ -918,15 +890,14 @@ def process_answer(question: dict, selected_idx: int, user_text: str = ""):
     st.session_state.answer_submitted = True
 
 
-# ============================================
-# Results Step
-# ============================================
+# =============================================================================
+# Results Screen
+# =============================================================================
 def render_results_step():
-    """Render the final results screen."""
+    """Render the final results screen using UI components."""
 
     total_questions = len(st.session_state.quiz_data)
     score = st.session_state.score
-    max_score = total_questions * 15  # Approximate max with streaks
 
     # Calculate stats
     correct = total_questions - len(st.session_state.wrong_answers)
@@ -934,70 +905,53 @@ def render_results_step():
 
     grade, message, emoji = calculate_final_grade(correct, total_questions)
 
-    # Celebration animation
+    # Celebration animation via UI component
     if st.session_state.animations_enabled and percentage >= 70:
         show_confetti()
 
     render_celebration(correct, total_questions)
 
-    # Stats cards
+    # Stats cards - using render_stat_card from UI components
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.markdown(f"""
-        <div style="
-            background: white;
-            border-radius: 20px;
-            padding: 1.5rem;
-            text-align: center;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        ">
-            <div style="font-size: 2.5rem; font-weight: 700; color: #4F46E5;">{score}</div>
-            <div style="color: #6B7280;">Total Points</div>
-        </div>
-        """, unsafe_allow_html=True)
+        render_stat_card(
+            value=str(score),
+            label="Total Points",
+            icon="⭐",
+            color="#4F46E5"
+        )
 
     with col2:
-        st.markdown(f"""
-        <div style="
-            background: white;
-            border-radius: 20px;
-            padding: 1.5rem;
-            text-align: center;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        ">
-            <div style="font-size: 2.5rem; font-weight: 700; color: #FF6B35;">🔥 {st.session_state.max_streak}</div>
-            <div style="color: #6B7280;">Best Streak</div>
-        </div>
-        """, unsafe_allow_html=True)
+        render_stat_card(
+            value=f"🔥 {st.session_state.max_streak}",
+            label="Best Streak",
+            color="#FF6B35"
+        )
 
     with col3:
-        st.markdown(f"""
-        <div style="
-            background: white;
-            border-radius: 20px;
-            padding: 1.5rem;
-            text-align: center;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        ">
-            <div style="font-size: 2.5rem; font-weight: 700; color: #34D399;">{grade}</div>
-            <div style="color: #6B7280;">{message}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        render_stat_card(
+            value=grade,
+            label=message,
+            icon=emoji,
+            color="#34D399"
+        )
 
     # Wrong answers review
     if st.session_state.wrong_answers:
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("### 📚 Review These Questions")
+        render_card(
+            content="<p style='margin:0;'>Review the questions you missed below</p>",
+            title="📚 Review These Questions"
+        )
 
         for i, q in enumerate(st.session_state.wrong_answers):
             with st.expander(f"Question: {q.get('question_text', '')[:50]}..."):
-                st.markdown(f"**Question:** {q.get('question_text', '')}")
-                st.markdown(f"**Correct Answer:** {q.get('correct_answer', '')}")
-                st.markdown(f"**Explanation:** {q.get('explanation', '')}")
+                render_info_box(f"Question: {q.get('question_text', '')}", variant="info")
+                render_info_box(f"Correct Answer: {q.get('correct_answer', '')}", variant="success")
+                if q.get('explanation'):
+                    render_info_box(f"Explanation: {q.get('explanation', '')}", variant="info", icon="💡")
 
     # Action buttons
-    st.markdown("<br>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 1, 1])
 
     with col1:
@@ -1008,7 +962,7 @@ def render_results_step():
     with col2:
         if st.button("✏️ Edit Quiz", use_container_width=True):
             st.session_state.game_mode = "setup"
-            st.session_state.wizard_step = "edit"
+            st.session_state.wizard_step = STEP_EDITOR
             st.rerun()
 
     with col3:
@@ -1017,41 +971,51 @@ def render_results_step():
             st.rerun()
 
 
-# ============================================
-# Main Application
-# ============================================
+# =============================================================================
+# Main Application Router
+# =============================================================================
 def main():
-    """Main application entry point."""
+    """
+    Main application entry point.
+    Acts as a strict Router and State Manager that delegates
+    all visual rendering to the specialized UI module.
+    """
 
-    # Initialize session state
-    init_session_state()
-
-    # Load custom CSS
+    # CRITICAL: Load custom CSS FIRST to ensure Fredoka font and 60px touch targets
     load_custom_css()
+
+    # Initialize session state for persistence
+    init_session_state()
 
     # Render sidebar and get API key
     api_key = render_sidebar()
 
-    # Route based on current step
+    # ==========================================================================
+    # ROUTING LOGIC - Based on wizard_step state
+    # ==========================================================================
+
     if st.session_state.game_mode == "setup":
-        if st.session_state.wizard_step == "upload":
-            render_upload_step(api_key)
-        elif st.session_state.wizard_step == "analyze":
-            render_analyze_step(api_key)
-        elif st.session_state.wizard_step == "edit":
-            render_edit_step()
-        elif st.session_state.wizard_step == "action":
+        # Setup mode: 4-step wizard workflow
+        if st.session_state.wizard_step == STEP_INGESTION:
+            render_ingestion_step(api_key)
+        elif st.session_state.wizard_step == STEP_EXTRACTION:
+            render_extraction_step(api_key)
+        elif st.session_state.wizard_step == STEP_EDITOR:
+            render_editor_step()
+        elif st.session_state.wizard_step == STEP_PLAY:
             render_action_step()
         else:
-            render_upload_step(api_key)
+            # Default fallback to Ingestion
+            render_ingestion_step(api_key)
 
     elif st.session_state.game_mode == "play":
-        if st.session_state.wizard_step == "play":
-            render_play_step()
-        elif st.session_state.wizard_step == "results":
+        # Play mode: Interactive quiz or results
+        if st.session_state.wizard_step == STEP_PLAY:
+            render_play_mode()
+        elif st.session_state.wizard_step == STEP_RESULTS:
             render_results_step()
         else:
-            render_play_step()
+            render_play_mode()
 
 
 if __name__ == "__main__":
