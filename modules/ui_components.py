@@ -369,7 +369,6 @@ def render_card(
         variant: "default", "success", "error", "warning"
         custom_class: Additional CSS class
     """
-    import re
     
     bg_colors = {
         "default": "#FFFFFF",
@@ -385,8 +384,9 @@ def render_card(
         "warning": "#FBBF24"
     }
 
-    # Clean content: collapse whitespace and newlines to single spaces
-    clean_content = re.sub(r'\s+', ' ', content.strip())
+    # Clean content: dedent triple-quoted HTML and strip outer whitespace
+    import textwrap
+    clean_content = textwrap.dedent(content).strip()
     
     # Build card style as single line
     card_style = f"background:{bg_colors.get(variant, bg_colors['default'])};border:3px solid {border_colors.get(variant, 'transparent')};border-radius:24px;padding:2rem;margin:1rem 0;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);"
