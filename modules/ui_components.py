@@ -2,7 +2,8 @@
 CIFE Edu-Suite - UI Components Module
 ======================================
 Reusable UI components following the child-centric design system.
-Includes cards, buttons, progress bars, and styled containers.
+All HTML-based components are rendered using st.markdown with unsafe_allow_html=True.
+Includes cards, buttons, progress bars, wizard steps, and styled containers.
 """
 
 import streamlit as st
@@ -13,6 +14,7 @@ import os
 def load_custom_css():
     """
     Load and inject the custom CSS file into the Streamlit app.
+    Applies the Fredoka font globally and includes all required animations.
     """
     css_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "custom.css")
 
@@ -23,28 +25,318 @@ def load_custom_css():
         # Fallback inline CSS if file doesn't exist
         css_content = _get_fallback_css()
 
+    # Inject the CSS using st.markdown with unsafe_allow_html=True
     st.markdown(f"<style>{css_content}</style>", unsafe_allow_html=True)
 
 
 def _get_fallback_css() -> str:
-    """Return fallback CSS if file is not found."""
+    """
+    Return comprehensive fallback CSS if the external file is not found.
+    Includes Fredoka font, animations, touch targets, and all required styles.
+    """
     return """
+    /* Google Fonts Import - Fredoka */
     @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@300;400;500;600;700&display=swap');
-    html, body, button, input { font-family: 'Fredoka', sans-serif !important; }
-    .block-container { padding-top: 1rem !important; max-width: 1200px !important; }
+
+    /* Global Font Application */
+    html, body, button, input, textarea, select, [class*="st-"], .stMarkdown, .stButton > button {
+        font-family: 'Fredoka', sans-serif !important;
+    }
+
+    /* Color Palette Variables */
+    :root {
+        --bg-light-gray: #F0F2F6;
+        --bg-light-blue: #E0F2FE;
+        --primary-indigo: #4F46E5;
+        --primary-hover: #4338CA;
+        --success-emerald: #34D399;
+        --success-dark: #059669;
+        --error-red: #F87171;
+        --error-dark: #DC2626;
+        --warning-amber: #FBBF24;
+        --text-dark: #1F2937;
+        --text-light: #6B7280;
+        --white: #FFFFFF;
+    }
+
+    /* Remove Streamlit Default Padding */
+    .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 1rem !important;
+        max-width: 1200px !important;
+    }
+
+    /* Hide Streamlit Branding */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+
+    /* Main App Background */
+    .stApp {
+        background: linear-gradient(135deg, var(--bg-light-blue) 0%, var(--bg-light-gray) 100%);
+    }
+
+    /* ============================================= */
+    /* BUTTON STYLES - Child-Friendly Touch Targets */
+    /* ============================================= */
+
     .stButton > button {
         font-family: 'Fredoka', sans-serif !important;
-        min-height: 60px !important;
-        border-radius: 9999px !important;
-        background: linear-gradient(135deg, #4F46E5 0%, #6366F1 100%) !important;
-        color: white !important;
         font-weight: 500 !important;
         font-size: 1.1rem !important;
+        min-height: 60px !important;
+        border-radius: 9999px !important;
+        background: linear-gradient(135deg, var(--primary-indigo) 0%, #6366F1 100%) !important;
+        color: var(--white) !important;
+        border: none !important;
+        padding: 0.75rem 2rem !important;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1) !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    }
+
+    .stButton > button:hover {
+        background: linear-gradient(135deg, var(--primary-hover) 0%, #4F46E5 100%) !important;
+        transform: scale(1.05) !important;
+        box-shadow: 0 20px 25px -5px rgba(79, 70, 229, 0.3) !important;
+    }
+
+    .stButton > button:active {
+        transform: scale(0.98) !important;
+    }
+
+    /* ============================================= */
+    /* CARD STYLES */
+    /* ============================================= */
+
+    .game-card {
+        background: var(--white);
+        border-radius: 24px;
+        padding: 2rem;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        border: 3px solid transparent;
+    }
+
+    .game-card:hover {
+        transform: scale(1.02);
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
+    }
+
+    /* Option Card for MCQ */
+    .option-card {
+        background: var(--white);
+        border-radius: 20px;
+        padding: 1.5rem;
+        min-height: 60px;
+        margin: 0.5rem 0;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        transition: all 0.2s ease;
+        border: 3px solid #E5E7EB;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .option-card:hover {
+        transform: translateY(-2px) scale(1.02);
+        border-color: var(--primary-indigo);
+        box-shadow: 0 10px 20px rgba(79, 70, 229, 0.15);
+    }
+
+    .option-card.selected {
+        border-color: var(--primary-indigo);
+        background: linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%);
+    }
+
+    .option-card.correct {
+        border-color: var(--success-emerald);
+        background: linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%);
+        animation: pulse-correct 0.5s ease;
+    }
+
+    .option-card.incorrect {
+        border-color: var(--error-red);
+        background: linear-gradient(135deg, #FEE2E2 0%, #FECACA 100%);
+        animation: shake 0.5s ease;
+    }
+
+    /* ============================================= */
+    /* ANIMATIONS */
+    /* ============================================= */
+
+    /* Shake Animation for Incorrect Answers */
+    @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        10%, 30%, 50%, 70%, 90% { transform: translateX(-8px); }
+        20%, 40%, 60%, 80% { transform: translateX(8px); }
+    }
+
+    .shake {
+        animation: shake 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+    }
+
+    /* Pulse Animation for Correct Answers */
+    @keyframes pulse-correct {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.03); }
+        100% { transform: scale(1); }
+    }
+
+    /* Bounce In Animation */
+    @keyframes bounceIn {
+        0% { transform: scale(0.3); opacity: 0; }
+        50% { transform: scale(1.05); }
+        70% { transform: scale(0.9); }
+        100% { transform: scale(1); opacity: 1; }
+    }
+
+    .bounce-in {
+        animation: bounceIn 0.6s ease;
+    }
+
+    /* Fade Slide Up */
+    @keyframes fadeSlideUp {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    .fade-slide-up {
+        animation: fadeSlideUp 0.4s ease forwards;
+    }
+
+    /* Streak Fire Animation */
+    @keyframes fireGlow {
+        0%, 100% { text-shadow: 0 0 10px #FF6B35, 0 0 20px #FF6B35; }
+        50% { text-shadow: 0 0 20px #FF9F1C, 0 0 30px #FF9F1C, 0 0 40px #FF9F1C; }
+    }
+
+    .streak-fire {
+        animation: fireGlow 1s ease-in-out infinite;
+    }
+
+    /* ============================================= */
+    /* WIZARD STEPS */
+    /* ============================================= */
+
+    .wizard-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 0;
+        margin: 2rem 0;
+        flex-wrap: wrap;
+    }
+
+    .wizard-step {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .wizard-step-circle {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+        font-weight: 700;
+        font-family: 'Fredoka', sans-serif;
+        transition: all 0.3s ease;
+    }
+
+    .wizard-step-circle.active {
+        background: var(--primary-indigo);
+        color: white;
+        box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.2);
+    }
+
+    .wizard-step-circle.completed {
+        background: var(--success-emerald);
+        color: white;
+    }
+
+    .wizard-step-circle.pending {
+        background: #E5E7EB;
+        color: var(--text-light);
+    }
+
+    .wizard-connector {
+        width: 60px;
+        height: 3px;
+        border-radius: 2px;
+        margin-top: -25px;
+        align-self: flex-start;
+        margin-left: -5px;
+        margin-right: -5px;
+    }
+
+    /* ============================================= */
+    /* FEEDBACK STYLES */
+    /* ============================================= */
+
+    .feedback-correct {
+        background: linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%);
+        border: 3px solid var(--success-emerald);
+        border-radius: 20px;
+        padding: 1.5rem;
+        text-align: center;
+    }
+
+    .feedback-incorrect {
+        background: linear-gradient(135deg, #FEE2E2 0%, #FECACA 100%);
+        border: 3px solid var(--error-red);
+        border-radius: 20px;
+        padding: 1.5rem;
+        text-align: center;
+    }
+
+    /* ============================================= */
+    /* PROGRESS BAR */
+    /* ============================================= */
+
+    .progress-container {
+        background: #E5E7EB;
+        border-radius: 9999px;
+        height: 24px;
+        overflow: hidden;
+        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .progress-bar {
+        height: 100%;
+        border-radius: 9999px;
+        background: linear-gradient(90deg, var(--primary-indigo) 0%, #818CF8 50%, var(--success-emerald) 100%);
+        transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* ============================================= */
+    /* RESPONSIVE ADJUSTMENTS */
+    /* ============================================= */
+
+    @media (max-width: 768px) {
+        .stButton > button {
+            min-height: 60px !important;
+            font-size: 1rem !important;
+            padding: 0.5rem 1.5rem !important;
+        }
+
+        .game-card {
+            padding: 1.5rem;
+            border-radius: 20px;
+        }
+
+        .wizard-connector {
+            width: 30px;
+        }
     }
     """
 
 
-def render_header(title: str, subtitle: str = "", emoji: str = ""):
+def render_header(title: str, subtitle: str = "", emoji: str = "") -> None:
     """
     Render a styled page header.
 
@@ -66,7 +358,7 @@ def render_header(title: str, subtitle: str = "", emoji: str = ""):
             background-clip: text;
             margin: 0;
         ">{title}</h1>
-        {f'<p style="font-size: 1.2rem; color: #6B7280; margin-top: 0.5rem;">{subtitle}</p>' if subtitle else ''}
+        {f'<p style="font-family: Fredoka, sans-serif; font-size: 1.2rem; color: #6B7280; margin-top: 0.5rem;">{subtitle}</p>' if subtitle else ''}
     </div>
     """
     st.markdown(header_html, unsafe_allow_html=True)
@@ -126,7 +418,7 @@ def render_card_button(
     disabled: bool = False
 ) -> bool:
     """
-    Render a large, game-style card button.
+    Render a large, game-style card button with 60px minimum height.
 
     Args:
         text: Button text
@@ -149,34 +441,30 @@ def render_card_button(
     bg, hover_bg = colors.get(variant, colors["primary"])
     text_color = "#FFFFFF" if variant != "secondary" else "#374151"
 
-    # Create a unique container with custom styling
-    button_id = f"card-btn-{key}"
-
+    # Inject custom styling for this button variant
     custom_style = f"""
     <style>
-    div[data-testid="stHorizontalBlock"] div[data-testid="column"]:has(button[kind="primary"]) {{
-        width: 100%;
+    div[data-testid="stButton"] > button {{
+        min-height: 60px !important;
+        border-radius: 24px !important;
     }}
     </style>
     """
     st.markdown(custom_style, unsafe_allow_html=True)
 
     # Use Streamlit's native button with custom key
-    with st.container():
-        col1, col2, col3 = st.columns([1, 3, 1])
-        with col2:
-            button_text = f"{icon} {text}" if icon else text
-            clicked = st.button(
-                button_text,
-                key=key,
-                use_container_width=True,
-                disabled=disabled
-            )
+    button_text = f"{icon} {text}" if icon else text
+    clicked = st.button(
+        button_text,
+        key=key,
+        use_container_width=True,
+        disabled=disabled
+    )
 
-            if clicked and callback:
-                callback()
+    if clicked and callback:
+        callback()
 
-            return clicked
+    return clicked
 
 
 def render_option_card(
@@ -189,6 +477,7 @@ def render_option_card(
 ) -> bool:
     """
     Render a selectable option card for multiple choice questions.
+    Uses st.markdown for styled HTML rendering with a hidden button for click handling.
 
     Args:
         option_text: The option text content
@@ -206,18 +495,22 @@ def render_option_card(
         bg = "linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%)"
         border = "#34D399"
         icon = "✓"
+        animation_class = "pulse-correct"
     elif is_correct is False:
         bg = "linear-gradient(135deg, #FEE2E2 0%, #FECACA 100%)"
         border = "#F87171"
         icon = "✗"
+        animation_class = "shake"
     elif is_selected:
         bg = "linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%)"
         border = "#4F46E5"
         icon = ""
+        animation_class = ""
     else:
         bg = "#FFFFFF"
         border = "#E5E7EB"
         icon = ""
+        animation_class = ""
 
     label_colors = {
         "A": "#4F46E5",
@@ -228,23 +521,24 @@ def render_option_card(
 
     label_color = label_colors.get(option_label, "#4F46E5")
 
+    # Render the styled option card HTML
     card_html = f"""
-    <div style="
+    <div class="option-card {animation_class}" style="
         background: {bg};
         border: 3px solid {border};
-        border-radius: 16px;
+        border-radius: 20px;
         padding: 1rem 1.5rem;
+        min-height: 60px;
         margin: 0.5rem 0;
         display: flex;
         align-items: center;
         gap: 1rem;
         transition: all 0.2s ease;
-        cursor: {'not-allowed' if disabled else 'pointer'};
         opacity: {'0.7' if disabled else '1'};
     ">
         <div style="
-            width: 40px;
-            height: 40px;
+            width: 44px;
+            height: 44px;
             border-radius: 50%;
             background: {label_color};
             color: white;
@@ -253,20 +547,34 @@ def render_option_card(
             justify-content: center;
             font-weight: 700;
             font-size: 1.2rem;
+            font-family: 'Fredoka', sans-serif;
             flex-shrink: 0;
         ">{option_label}</div>
         <div style="
             font-family: 'Fredoka', sans-serif;
             font-size: 1.1rem;
             flex-grow: 1;
+            color: #1F2937;
         ">{option_text}</div>
-        {f'<div style="font-size: 1.5rem;">{icon}</div>' if icon else ''}
+        {f'<div style="font-size: 1.5rem; flex-shrink: 0;">{icon}</div>' if icon else ''}
     </div>
     """
+    st.markdown(card_html, unsafe_allow_html=True)
 
-    # We can't make the HTML directly clickable, so we use a button
+    # Use a native Streamlit button for click handling (styled to be less prominent)
+    button_style = """
+    <style>
+    div.option-button-container .stButton > button {
+        min-height: 60px !important;
+        border-radius: 20px !important;
+        margin-top: -0.5rem !important;
+    }
+    </style>
+    """
+    st.markdown(button_style, unsafe_allow_html=True)
+
     clicked = st.button(
-        f"{option_label}. {option_text}",
+        f"Select {option_label}",
         key=key,
         use_container_width=True,
         disabled=disabled
@@ -295,7 +603,7 @@ def render_progress_bar(
     progress_html = f"""
     <div style="margin: 1.5rem 0;">
         {f'<div style="font-family: Fredoka, sans-serif; font-weight: 500; margin-bottom: 0.5rem; color: #374151;">{label}</div>' if label else ''}
-        <div style="
+        <div class="progress-container" style="
             background: #E5E7EB;
             border-radius: 9999px;
             height: 24px;
@@ -303,7 +611,7 @@ def render_progress_bar(
             box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
             position: relative;
         ">
-            <div style="
+            <div class="progress-bar" style="
                 height: 100%;
                 width: {percentage}%;
                 border-radius: 9999px;
@@ -339,6 +647,7 @@ def render_score_display(
         streak_class = "streak-fire" if streak >= 3 else ""
         streak_html = f"""
         <div class="{streak_class}" style="
+            font-family: 'Fredoka', sans-serif;
             font-size: 1.5rem;
             font-weight: 600;
             color: #FF6B35;
@@ -355,6 +664,7 @@ def render_score_display(
     score_html = f"""
     <div style="text-align: center; padding: 1rem;">
         <div style="
+            font-family: 'Fredoka', sans-serif;
             font-size: 3rem;
             font-weight: 700;
             background: linear-gradient(135deg, #4F46E5 0%, #818CF8 100%);
@@ -414,34 +724,59 @@ def render_wizard_steps(
     current_step: int
 ) -> None:
     """
-    Render a wizard progress indicator.
+    Render a wizard progress indicator with flexbox container,
+    progress circles, and connecting lines.
 
     Args:
         steps: List of step names
         current_step: Current step index (0-based)
     """
-    steps_html = '<div style="display: flex; justify-content: center; gap: 2rem; margin: 2rem 0; flex-wrap: wrap;">'
+    # Build the wizard steps HTML with flexbox container
+    steps_html = """
+    <div class="wizard-container" style="
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        gap: 0;
+        margin: 2rem 0;
+        flex-wrap: wrap;
+    ">
+    """
 
     for i, step_name in enumerate(steps):
         if i < current_step:
-            # Completed
-            circle_style = "background: #34D399; color: white;"
-            label_style = "color: #059669;"
+            # Completed step
+            circle_bg = "#34D399"
+            circle_color = "white"
+            circle_shadow = ""
+            label_color = "#059669"
+            label_weight = "500"
             icon = "✓"
         elif i == current_step:
-            # Active
-            circle_style = "background: #4F46E5; color: white; box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.2);"
-            label_style = "color: #4F46E5; font-weight: 600;"
+            # Active step
+            circle_bg = "#4F46E5"
+            circle_color = "white"
+            circle_shadow = "box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.2);"
+            label_color = "#4F46E5"
+            label_weight = "600"
             icon = str(i + 1)
         else:
-            # Pending
-            circle_style = "background: #E5E7EB; color: #6B7280;"
-            label_style = "color: #9CA3AF;"
+            # Pending step
+            circle_bg = "#E5E7EB"
+            circle_color = "#6B7280"
+            circle_shadow = ""
+            label_color = "#9CA3AF"
+            label_weight = "500"
             icon = str(i + 1)
 
         steps_html += f"""
-        <div style="display: flex; flex-direction: column; align-items: center; gap: 0.5rem;">
-            <div style="
+        <div class="wizard-step" style="
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+        ">
+            <div class="wizard-step-circle" style="
                 width: 50px;
                 height: 50px;
                 border-radius: 50%;
@@ -452,13 +787,17 @@ def render_wizard_steps(
                 font-weight: 700;
                 font-family: 'Fredoka', sans-serif;
                 transition: all 0.3s ease;
-                {circle_style}
+                background: {circle_bg};
+                color: {circle_color};
+                {circle_shadow}
             ">{icon}</div>
-            <div style="
+            <div class="wizard-step-label" style="
                 font-size: 0.9rem;
                 font-family: 'Fredoka', sans-serif;
                 text-align: center;
-                {label_style}
+                color: {label_color};
+                font-weight: {label_weight};
+                max-width: 80px;
             ">{step_name}</div>
         </div>
         """
@@ -467,12 +806,13 @@ def render_wizard_steps(
         if i < len(steps) - 1:
             line_color = "#34D399" if i < current_step else "#E5E7EB"
             steps_html += f"""
-            <div style="
+            <div class="wizard-connector" style="
                 width: 60px;
                 height: 3px;
                 background: {line_color};
-                margin-top: 25px;
                 border-radius: 2px;
+                margin-top: 23px;
+                flex-shrink: 0;
             "></div>
             """
 
@@ -487,6 +827,7 @@ def render_feedback(
 ) -> None:
     """
     Render answer feedback with animation.
+    Uses shake animation for incorrect answers and bounce for correct.
 
     Args:
         is_correct: Whether the answer was correct
@@ -510,7 +851,7 @@ def render_feedback(
                 color: #059669;
                 font-family: 'Fredoka', sans-serif;
             ">Correct!</div>
-            {f'<div style="background: white; border-radius: 16px; padding: 1rem; margin-top: 1rem; border-left: 4px solid #4F46E5; text-align: left;"><strong>💡 Did you know?</strong> {explanation}</div>' if explanation else ''}
+            {f'<div style="background: white; border-radius: 16px; padding: 1rem; margin-top: 1rem; border-left: 4px solid #4F46E5; text-align: left; font-family: Fredoka, sans-serif;"><strong>💡 Did you know?</strong> {explanation}</div>' if explanation else ''}
         </div>
         """
     else:
@@ -530,8 +871,8 @@ def render_feedback(
                 color: #DC2626;
                 font-family: 'Fredoka', sans-serif;
             ">Not quite!</div>
-            {f'<div style="margin-top: 0.5rem; color: #374151;"><strong>Correct answer:</strong> {correct_answer}</div>' if correct_answer else ''}
-            {f'<div style="background: white; border-radius: 16px; padding: 1rem; margin-top: 1rem; border-left: 4px solid #4F46E5; text-align: left;"><strong>📚 Learn:</strong> {explanation}</div>' if explanation else ''}
+            {f'<div style="margin-top: 0.5rem; color: #374151; font-family: Fredoka, sans-serif;"><strong>Correct answer:</strong> {correct_answer}</div>' if correct_answer else ''}
+            {f'<div style="background: white; border-radius: 16px; padding: 1rem; margin-top: 1rem; border-left: 4px solid #4F46E5; text-align: left; font-family: Fredoka, sans-serif;"><strong>📚 Learn:</strong> {explanation}</div>' if explanation else ''}
         </div>
         """
 
@@ -575,6 +916,7 @@ def render_celebration(score: int, total: int) -> None:
             margin-bottom: 1rem;
         ">{message}</h1>
         <div style="
+            font-family: 'Fredoka', sans-serif;
             font-size: 4rem;
             font-weight: 700;
             background: linear-gradient(135deg, #4F46E5 0%, #818CF8 100%);
@@ -583,6 +925,7 @@ def render_celebration(score: int, total: int) -> None:
             background-clip: text;
         ">{score}/{total}</div>
         <div style="
+            font-family: 'Fredoka', sans-serif;
             font-size: 1.5rem;
             color: #6B7280;
             margin-top: 0.5rem;
@@ -620,7 +963,94 @@ def render_empty_state(
             color: #6B7280;
             font-family: 'Fredoka', sans-serif;
         ">{message}</div>
-        {f'<div style="font-size: 1rem; color: #9CA3AF; margin-top: 0.5rem;">{action_text}</div>' if action_text else ''}
+        {f'<div style="font-size: 1rem; color: #9CA3AF; margin-top: 0.5rem; font-family: Fredoka, sans-serif;">{action_text}</div>' if action_text else ''}
     </div>
     """
     st.markdown(empty_html, unsafe_allow_html=True)
+
+
+def render_info_box(
+    message: str,
+    variant: str = "info",
+    icon: str = ""
+) -> None:
+    """
+    Render an information box with optional icon.
+
+    Args:
+        message: The message to display
+        variant: "info", "success", "warning", "error"
+        icon: Optional emoji icon
+    """
+    colors = {
+        "info": ("#EEF2FF", "#4F46E5", "💡"),
+        "success": ("#D1FAE5", "#059669", "✅"),
+        "warning": ("#FEF3C7", "#D97706", "⚠️"),
+        "error": ("#FEE2E2", "#DC2626", "❌")
+    }
+
+    bg_color, text_color, default_icon = colors.get(variant, colors["info"])
+    display_icon = icon if icon else default_icon
+
+    info_html = f"""
+    <div style="
+        background: {bg_color};
+        border-radius: 16px;
+        padding: 1rem 1.5rem;
+        margin: 1rem 0;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        border-left: 4px solid {text_color};
+    ">
+        <div style="font-size: 1.5rem; flex-shrink: 0;">{display_icon}</div>
+        <div style="
+            font-family: 'Fredoka', sans-serif;
+            font-size: 1rem;
+            color: {text_color};
+        ">{message}</div>
+    </div>
+    """
+    st.markdown(info_html, unsafe_allow_html=True)
+
+
+def render_stat_card(
+    value: str,
+    label: str,
+    icon: str = "",
+    color: str = "#4F46E5"
+) -> None:
+    """
+    Render a statistics card with large value display.
+
+    Args:
+        value: The main value to display
+        label: Description label
+        icon: Optional emoji icon
+        color: Accent color for the value
+    """
+    stat_html = f"""
+    <div style="
+        background: white;
+        border-radius: 20px;
+        padding: 1.5rem;
+        text-align: center;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        min-height: 60px;
+    ">
+        {f'<div style="font-size: 2rem; margin-bottom: 0.5rem;">{icon}</div>' if icon else ''}
+        <div style="
+            font-family: 'Fredoka', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: {color};
+        ">{value}</div>
+        <div style="
+            font-family: 'Fredoka', sans-serif;
+            font-size: 1rem;
+            color: #6B7280;
+            margin-top: 0.25rem;
+        ">{label}</div>
+    </div>
+    """
+    st.markdown(stat_html, unsafe_allow_html=True)
