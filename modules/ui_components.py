@@ -731,93 +731,42 @@ def render_wizard_steps(
         steps: List of step names
         current_step: Current step index (0-based)
     """
-    # Build the wizard steps HTML with flexbox container
-    steps_html = """
-    <div class="wizard-container" style="
-        display: flex;
-        justify-content: center;
-        align-items: flex-start;
-        gap: 0;
-        margin: 2rem 0;
-        flex-wrap: wrap;
-    ">
-    """
+    # Build the wizard steps HTML - use single-line styles to avoid rendering issues
+    html_parts = []
+    html_parts.append('<div class="wizard-container" style="display:flex;justify-content:center;align-items:flex-start;gap:0;margin:2rem 0;flex-wrap:wrap;">')
 
     for i, step_name in enumerate(steps):
         if i < current_step:
             # Completed step
-            circle_bg = "#34D399"
-            circle_color = "white"
-            circle_shadow = ""
-            label_color = "#059669"
-            label_weight = "500"
+            circle_style = "width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:700;font-family:'Fredoka',sans-serif;transition:all 0.3s ease;background:#34D399;color:white;"
+            label_style = "font-size:0.9rem;font-family:'Fredoka',sans-serif;text-align:center;color:#059669;font-weight:500;max-width:80px;"
             icon = "✓"
         elif i == current_step:
             # Active step
-            circle_bg = "#4F46E5"
-            circle_color = "white"
-            circle_shadow = "box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.2);"
-            label_color = "#4F46E5"
-            label_weight = "600"
+            circle_style = "width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:700;font-family:'Fredoka',sans-serif;transition:all 0.3s ease;background:#4F46E5;color:white;box-shadow:0 0 0 4px rgba(79,70,229,0.2);"
+            label_style = "font-size:0.9rem;font-family:'Fredoka',sans-serif;text-align:center;color:#4F46E5;font-weight:600;max-width:80px;"
             icon = str(i + 1)
         else:
             # Pending step
-            circle_bg = "#E5E7EB"
-            circle_color = "#6B7280"
-            circle_shadow = ""
-            label_color = "#9CA3AF"
-            label_weight = "500"
+            circle_style = "width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:700;font-family:'Fredoka',sans-serif;transition:all 0.3s ease;background:#E5E7EB;color:#6B7280;"
+            label_style = "font-size:0.9rem;font-family:'Fredoka',sans-serif;text-align:center;color:#9CA3AF;font-weight:500;max-width:80px;"
             icon = str(i + 1)
 
-        steps_html += f"""
-        <div class="wizard-step" style="
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.5rem;
-        ">
-            <div class="wizard-step-circle" style="
-                width: 50px;
-                height: 50px;
-                border-radius: 50%;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 1.2rem;
-                font-weight: 700;
-                font-family: 'Fredoka', sans-serif;
-                transition: all 0.3s ease;
-                background: {circle_bg};
-                color: {circle_color};
-                {circle_shadow}
-            ">{icon}</div>
-            <div class="wizard-step-label" style="
-                font-size: 0.9rem;
-                font-family: 'Fredoka', sans-serif;
-                text-align: center;
-                color: {label_color};
-                font-weight: {label_weight};
-                max-width: 80px;
-            ">{step_name}</div>
-        </div>
-        """
+        html_parts.append(f'<div class="wizard-step" style="display:flex;flex-direction:column;align-items:center;gap:0.5rem;">')
+        html_parts.append(f'<div class="wizard-step-circle" style="{circle_style}">{icon}</div>')
+        html_parts.append(f'<div class="wizard-step-label" style="{label_style}">{step_name}</div>')
+        html_parts.append('</div>')
 
         # Add connector line (except after last step)
         if i < len(steps) - 1:
             line_color = "#34D399" if i < current_step else "#E5E7EB"
-            steps_html += f"""
-            <div class="wizard-connector" style="
-                width: 60px;
-                height: 3px;
-                background: {line_color};
-                border-radius: 2px;
-                margin-top: 23px;
-                flex-shrink: 0;
-            "></div>
-            """
+            html_parts.append(f'<div class="wizard-connector" style="width:60px;height:3px;background:{line_color};border-radius:2px;margin-top:23px;flex-shrink:0;"></div>')
 
-    steps_html += '</div>'
-    st.markdown(steps_html, unsafe_allow_html=True)
+    html_parts.append('</div>')
+    
+    # Join and render - single call to markdown
+    final_html = ''.join(html_parts)
+    st.markdown(final_html, unsafe_allow_html=True)
 
 
 def render_feedback(
