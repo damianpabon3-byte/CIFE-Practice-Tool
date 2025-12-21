@@ -46,6 +46,7 @@ from modules.vision_processor import analyze_notebook_image, analyze_multiple_im
 from modules.content_generator import (
     generate_quiz,
     generate_quiz_from_analysis,
+    generate_quiz_from_analysis_batched,
     quiz_to_dataframe,
     dataframe_to_quiz,
     create_smart_blank
@@ -64,7 +65,8 @@ from modules.exporter import (
     create_pdf,
     create_docx,
     create_json_export,
-    get_download_filename
+    get_download_filename,
+    import_from_json
 )
 
 
@@ -156,6 +158,14 @@ def init_session_state():
     # Uploaded files cache
     if "uploaded_files" not in st.session_state:
         st.session_state.uploaded_files = None
+
+    # Upload signature for caching analysis (avoid re-running extraction)
+    if "upload_signature" not in st.session_state:
+        st.session_state.upload_signature = None
+
+    # Cached analysis signature to know if we already analyzed these files
+    if "analysis_signature" not in st.session_state:
+        st.session_state.analysis_signature = None
 
     # Generation settings
     if "mc_count" not in st.session_state:
@@ -273,6 +283,23 @@ def render_sidebar():
 
 
 # =============================================================================
+# Helper: Compute upload signature for caching
+# =============================================================================
+def _compute_upload_signature(files) -> str:
+    """Compute a signature from uploaded files to detect changes."""
+    import hashlib
+    if not files:
+        return ""
+    sig_parts = []
+    for f in files:
+        f.seek(0)
+        content = f.read()
+        f.seek(0)
+        sig_parts.append(f"{f.name}:{len(content)}:{hashlib.md5(content).hexdigest()[:8]}")
+    return "|".join(sorted(sig_parts))
+
+
+# =============================================================================
 # Step 1: Ingestion (Upload)
 # =============================================================================
 def render_ingestion_step(api_key: str):
@@ -280,70 +307,140 @@ def render_ingestion_step(api_key: str):
 
     render_header(
         "Upload Notebook Photos",
-        "Take a photo of your student's notebook and upload it here",
+        "Take a photo of your student's notebook or load a saved quiz",
         "📷"
     )
 
     render_wizard_steps(WIZARD_STEPS, current_step=0)
 
-    col1, col2 = st.columns([2, 1])
+    # Two tabs: Upload Images vs Load Saved Quiz
+    tab1, tab2 = st.tabs(["📸 Upload Images", "💾 Load Saved Quiz"])
 
-    with col1:
+    with tab1:
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            render_card(
+                content="""
+                <p style="color: #6B7280; margin: 0;">
+                    Upload photos of handwritten student notebooks. Our AI will analyze
+                    the content and generate personalized practice questions.
+                </p>
+                """,
+                title="📸 Upload Images"
+            )
+
+            uploaded_files = st.file_uploader(
+                "Choose notebook images",
+                type=["jpg", "jpeg", "png", "webp"],
+                accept_multiple_files=True,
+                key="notebook_uploader"
+            )
+
+            if uploaded_files:
+                st.session_state.uploaded_files = uploaded_files
+                # Compute and store upload signature
+                st.session_state.upload_signature = _compute_upload_signature(uploaded_files)
+                render_info_box(
+                    f"{len(uploaded_files)} image(s) uploaded successfully",
+                    variant="success",
+                    icon="✓"
+                )
+
+                # Show previews
+                cols = st.columns(min(len(uploaded_files), 4))
+                for i, file in enumerate(uploaded_files[:4]):
+                    with cols[i]:
+                        st.image(file, caption=f"Image {i+1}", width="stretch")
+
+        with col2:
+            render_card(
+                content="""
+                <ul style="color: #4338CA; padding-left: 1.2rem; margin: 0;">
+                    <li>Use good lighting</li>
+                    <li>Keep camera steady</li>
+                    <li>Include full page</li>
+                    <li>Avoid shadows</li>
+                </ul>
+                """,
+                title="💡 Tips for best results",
+                variant="warning"
+            )
+
+        # Next button - triggers visual update of progress circles
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button(
+                "🔍 Analyze Notebook →",
+                width="stretch",
+                disabled=not uploaded_files or not api_key
+            ):
+                st.session_state.wizard_step = STEP_EXTRACTION
+                st.rerun()
+
+    with tab2:
         render_card(
             content="""
             <p style="color: #6B7280; margin: 0;">
-                Upload photos of handwritten student notebooks. Our AI will analyze
-                the content and generate personalized practice questions.
+                Load a previously saved quiz (.json file) to edit or play again.
+                This skips the analysis step and goes directly to editing.
             </p>
             """,
-            title="📸 Upload Images"
+            title="💾 Load Saved Quiz"
         )
 
-        uploaded_files = st.file_uploader(
-            "Choose notebook images",
-            type=["jpg", "jpeg", "png", "webp"],
-            accept_multiple_files=True,
-            key="notebook_uploader"
+        json_file = st.file_uploader(
+            "Choose a saved quiz file",
+            type=["json"],
+            key="json_uploader"
         )
 
-        if uploaded_files:
-            st.session_state.uploaded_files = uploaded_files
-            render_info_box(
-                f"{len(uploaded_files)} image(s) uploaded successfully",
-                variant="success",
-                icon="✓"
-            )
+        if json_file:
+            try:
+                json_content = json_file.read().decode("utf-8")
+                questions, metadata = import_from_json(json_content)
 
-            # Show previews
-            cols = st.columns(min(len(uploaded_files), 4))
-            for i, file in enumerate(uploaded_files[:4]):
-                with cols[i]:
-                    st.image(file, caption=f"Image {i+1}", width="stretch")
+                if not questions:
+                    st.error("No questions found in the JSON file.")
+                else:
+                    render_info_box(
+                        f"Found {len(questions)} questions in the saved quiz",
+                        variant="success",
+                        icon="✓"
+                    )
 
-    with col2:
-        render_card(
-            content="""
-            <ul style="color: #4338CA; padding-left: 1.2rem; margin: 0;">
-                <li>Use good lighting</li>
-                <li>Keep camera steady</li>
-                <li>Include full page</li>
-                <li>Avoid shadows</li>
-            </ul>
-            """,
-            title="💡 Tips for best results",
-            variant="warning"
-        )
+                    # Show metadata preview
+                    if metadata:
+                        st.write(f"**Title:** {metadata.get('title', 'Untitled')}")
+                        st.write(f"**Subject:** {metadata.get('subject', 'N/A')}")
+                        st.write(f"**Grade:** {metadata.get('grade', 'N/A')}")
 
-    # Next button - triggers visual update of progress circles
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        if st.button(
-            "🔍 Analyze Notebook →",
-            width="stretch",
-            disabled=not uploaded_files or not api_key
-        ):
-            st.session_state.wizard_step = STEP_EXTRACTION
-            st.rerun()
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("✏️ Edit Quiz", width="stretch", key="json_edit"):
+                            # Restore quiz data and metadata
+                            st.session_state.quiz_data = questions
+                            st.session_state.quiz_df = quiz_to_dataframe(questions)
+                            st.session_state.quiz_title = metadata.get("title", "Imported Quiz")
+                            st.session_state.quiz_subject = metadata.get("subject", "")
+                            st.session_state.quiz_grade = metadata.get("grade", "")
+                            st.session_state.wizard_step = STEP_EDITOR
+                            st.rerun()
+
+                    with col2:
+                        if st.button("🎮 Play Now", width="stretch", key="json_play"):
+                            # Restore and go to play
+                            st.session_state.quiz_data = questions
+                            st.session_state.quiz_df = quiz_to_dataframe(questions)
+                            st.session_state.quiz_title = metadata.get("title", "Imported Quiz")
+                            st.session_state.quiz_subject = metadata.get("subject", "")
+                            st.session_state.quiz_grade = metadata.get("grade", "")
+                            st.session_state.wizard_step = STEP_PLAY
+                            st.session_state.game_mode = "setup"
+                            st.rerun()
+
+            except Exception as e:
+                st.error(f"Failed to load quiz: {str(e)}")
 
 
 # =============================================================================
@@ -360,158 +457,182 @@ def render_extraction_step(api_key: str):
 
     render_wizard_steps(WIZARD_STEPS, current_step=1)
 
-    with st.spinner("Analyzing images..."):
-        try:
-            progress_placeholder = st.empty()
-            with progress_placeholder.container():
-                render_info_box("Reading handwriting...", variant="info", icon="📖")
+    # Check if we need to run analysis or can use cached result
+    current_sig = st.session_state.upload_signature
+    cached_sig = st.session_state.analysis_signature
+    need_analysis = (current_sig != cached_sig) or (st.session_state.analysis_result is None)
 
-            # Validate API key before calling OpenAI
-            if not api_key or len(api_key.strip()) < 10:
-                raise ValueError("Invalid API key. Please provide a valid OpenAI API key.")
-
-            # Analyze images with defensive error handling
+    if need_analysis:
+        with st.spinner("Analyzing images..."):
             try:
-                if len(st.session_state.uploaded_files) == 1:
-                    analysis = analyze_notebook_image(
-                        st.session_state.uploaded_files[0],
-                        api_key
-                    )
-                else:
-                    analysis = analyze_multiple_images(
-                        st.session_state.uploaded_files,
-                        api_key
-                    )
-            except Exception as api_error:
-                error_msg = str(api_error).lower()
-                if "rate limit" in error_msg or "429" in error_msg:
-                    raise Exception("Rate limit exceeded. Please wait a moment and try again.")
-                elif "invalid" in error_msg and "key" in error_msg:
-                    raise Exception("Invalid API key. Please check your OpenAI API key.")
-                elif "timeout" in error_msg:
-                    raise Exception("Request timed out. Please try again.")
-                elif "connection" in error_msg:
-                    raise Exception("Connection error. Please check your internet connection.")
-                else:
-                    raise Exception(f"OpenAI API error: {str(api_error)[:100]}")
+                progress_placeholder = st.empty()
+                with progress_placeholder.container():
+                    render_info_box("Reading handwriting...", variant="info", icon="📖")
 
-            st.session_state.analysis_result = analysis
-            st.session_state.quiz_subject = analysis.get("subject", "General")
-            st.session_state.quiz_grade = analysis.get("detected_grade_level", "5")
+                # Validate API key before calling OpenAI
+                if not api_key or len(api_key.strip()) < 10:
+                    raise ValueError("Invalid API key. Please provide a valid OpenAI API key.")
 
-            progress_placeholder.empty()
-            render_info_box("Analysis complete!", variant="success", icon="✅")
+                # Analyze images with defensive error handling
+                try:
+                    if len(st.session_state.uploaded_files) == 1:
+                        analysis = analyze_notebook_image(
+                            st.session_state.uploaded_files[0],
+                            api_key
+                        )
+                    else:
+                        analysis = analyze_multiple_images(
+                            st.session_state.uploaded_files,
+                            api_key
+                        )
+                except Exception as api_error:
+                    error_msg = str(api_error).lower()
+                    if "rate limit" in error_msg or "429" in error_msg:
+                        raise Exception("Rate limit exceeded. Please wait a moment and try again.")
+                    elif "invalid" in error_msg and "key" in error_msg:
+                        raise Exception("Invalid API key. Please check your OpenAI API key.")
+                    elif "timeout" in error_msg:
+                        raise Exception("Request timed out. Please try again.")
+                    elif "connection" in error_msg:
+                        raise Exception("Connection error. Please check your internet connection.")
+                    else:
+                        raise Exception(f"OpenAI API error: {str(api_error)[:100]}")
 
-            # Show analysis results using render_card
-            col1, col2 = st.columns(2)
+                st.session_state.analysis_result = analysis
+                st.session_state.analysis_signature = current_sig
+                st.session_state.quiz_subject = analysis.get("subject", "General")
+                st.session_state.quiz_grade = analysis.get("detected_grade_level", "5")
 
-            with col1:
-                render_card(
-                    content="",
-                    title="📝 Transcribed Text"
-                )
-                st.text_area(
-                    "Transcription",
-                    value=analysis.get("transcribed_text", ""),
-                    height=200,
-                    label_visibility="collapsed"
-                )
+                progress_placeholder.empty()
+                render_info_box("Analysis complete!", variant="success", icon="✅")
 
-            with col2:
-                analysis_content = f"""
-                <p><strong>Subject:</strong> {analysis.get("subject", "Unknown")}</p>
-                <p><strong>Grade Level:</strong> {analysis.get("detected_grade_level", "Unknown")}</p>
-                <p><strong>Core Concept:</strong> {analysis.get("core_concept", "Unknown")}</p>
-                <p><strong>Language:</strong> {analysis.get("language", "Unknown")}</p>
-                """
-                render_card(
-                    content=analysis_content,
-                    title="📊 Analysis Results"
-                )
-
-                if analysis.get("key_terms"):
-                    key_terms = ", ".join(analysis.get("key_terms", []))
-                    render_info_box(f"Key Terms: {key_terms}", variant="info", icon="🏷️")
-
-            # Question configuration
-            render_card(
-                content="<p style='margin:0; color:#6B7280;'>Configure the number of questions to generate</p>",
-                title="📝 Quiz Configuration"
-            )
-
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                st.session_state.mc_count = st.number_input(
-                    "Multiple Choice Questions",
-                    min_value=0,
-                    max_value=10,
-                    value=st.session_state.mc_count
-                )
-
-            with col2:
-                st.session_state.tf_count = st.number_input(
-                    "True/False Questions",
-                    min_value=0,
-                    max_value=10,
-                    value=st.session_state.tf_count
-                )
-
-            with col3:
-                st.session_state.sa_count = st.number_input(
-                    "Short Answer Questions",
-                    min_value=0,
-                    max_value=10,
-                    value=st.session_state.sa_count
-                )
-
-            total = st.session_state.mc_count + st.session_state.tf_count + st.session_state.sa_count
-            render_info_box(f"Total questions: {total}", variant="info", icon="📊")
-
-            # Navigation buttons
-            col1, col2, col3 = st.columns([1, 1, 1])
-
-            with col1:
-                if st.button("← Back to Ingestion"):
+            except Exception as e:
+                render_info_box(f"Analysis failed: {str(e)}", variant="error", icon="❌")
+                if st.button("← Try Again"):
                     st.session_state.wizard_step = STEP_INGESTION
                     st.rerun()
+                return
+    else:
+        render_info_box("Using cached analysis (same images detected)", variant="info", icon="📋")
 
-            with col3:
-                if st.button(
-                    "Generate Quiz →",
-                    width="stretch",
-                    disabled=total == 0
-                ):
-                    # Generate quiz with defensive error handling
-                    with st.spinner("Generating questions..."):
-                        try:
-                            questions = generate_quiz_from_analysis(
-                                analysis,
-                                api_key,
-                                mc_count=st.session_state.mc_count,
-                                tf_count=st.session_state.tf_count,
-                                sa_count=st.session_state.sa_count
-                            )
-                            if not questions:
-                                raise ValueError("No questions were generated. Please try again.")
-                            st.session_state.quiz_data = questions
-                            st.session_state.quiz_df = quiz_to_dataframe(questions)
-                            st.session_state.wizard_step = STEP_EDITOR
-                            st.rerun()
-                        except Exception as gen_error:
-                            error_msg = str(gen_error).lower()
-                            if "rate limit" in error_msg or "429" in error_msg:
-                                st.error("⚠️ Rate limit exceeded. Please wait a moment and try again.")
-                            elif "invalid" in error_msg and "key" in error_msg:
-                                st.error("⚠️ Invalid API key. Please check your OpenAI API key.")
-                            else:
-                                st.error(f"⚠️ Quiz generation failed: {str(gen_error)[:100]}")
+    # Get analysis from session state
+    analysis = st.session_state.analysis_result
+    if not analysis:
+        render_info_box("No analysis available. Please go back and upload images.", variant="error", icon="❌")
+        if st.button("← Back to Upload"):
+            st.session_state.wizard_step = STEP_INGESTION
+            st.rerun()
+        return
 
-        except Exception as e:
-            render_info_box(f"Analysis failed: {str(e)}", variant="error", icon="❌")
-            if st.button("← Try Again"):
-                st.session_state.wizard_step = STEP_INGESTION
+    # Show analysis results using render_card
+    col1, col2 = st.columns(2)
+
+    with col1:
+        render_card(
+            content="",
+            title="📝 Transcribed Text"
+        )
+        st.text_area(
+            "Transcription",
+            value=analysis.get("transcribed_text", ""),
+            height=200,
+            label_visibility="collapsed"
+        )
+
+    with col2:
+        analysis_content = f"""
+        <p><strong>Subject:</strong> {analysis.get("subject", "Unknown")}</p>
+        <p><strong>Grade Level:</strong> {analysis.get("detected_grade_level", "Unknown")}</p>
+        <p><strong>Core Concept:</strong> {analysis.get("core_concept", "Unknown")}</p>
+        <p><strong>Language:</strong> {analysis.get("language", "Unknown")}</p>
+        """
+        render_card(
+            content=analysis_content,
+            title="📊 Analysis Results"
+        )
+
+        if analysis.get("key_terms"):
+            key_terms = ", ".join(analysis.get("key_terms", []))
+            render_info_box(f"Key Terms: {key_terms}", variant="info", icon="🏷️")
+
+    # Question configuration inside a form
+    render_card(
+        content="<p style='margin:0; color:#6B7280;'>Configure the number of questions to generate (max 80 per type)</p>",
+        title="📝 Quiz Configuration"
+    )
+
+    with st.form("quiz_config_form"):
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            mc_count = st.number_input(
+                "Multiple Choice Questions",
+                min_value=0,
+                max_value=80,
+                value=st.session_state.mc_count
+            )
+
+        with col2:
+            tf_count = st.number_input(
+                "True/False Questions",
+                min_value=0,
+                max_value=80,
+                value=st.session_state.tf_count
+            )
+
+        with col3:
+            sa_count = st.number_input(
+                "Short Answer Questions",
+                min_value=0,
+                max_value=80,
+                value=st.session_state.sa_count
+            )
+
+        total = mc_count + tf_count + sa_count
+        st.info(f"📊 Total questions: {total}")
+
+        # Form buttons
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            back_btn = st.form_submit_button("← Back to Ingestion")
+        with col2:
+            generate_btn = st.form_submit_button("Generate Quiz →", disabled=(total == 0))
+
+    # Handle form submissions outside the form
+    if back_btn:
+        st.session_state.wizard_step = STEP_INGESTION
+        st.rerun()
+
+    if generate_btn and total > 0:
+        # Store the form values in session state
+        st.session_state.mc_count = mc_count
+        st.session_state.tf_count = tf_count
+        st.session_state.sa_count = sa_count
+
+        # Generate quiz with batched generation for large counts
+        with st.spinner(f"Generating {total} questions..."):
+            try:
+                questions = generate_quiz_from_analysis_batched(
+                    analysis,
+                    api_key,
+                    mc_count=mc_count,
+                    tf_count=tf_count,
+                    sa_count=sa_count
+                )
+                if not questions:
+                    raise ValueError("No questions were generated. Please try again.")
+                st.session_state.quiz_data = questions
+                st.session_state.quiz_df = quiz_to_dataframe(questions)
+                st.session_state.wizard_step = STEP_EDITOR
                 st.rerun()
+            except Exception as gen_error:
+                error_msg = str(gen_error).lower()
+                if "rate limit" in error_msg or "429" in error_msg:
+                    st.error("⚠️ Rate limit exceeded. Please wait a moment and try again.")
+                elif "invalid" in error_msg and "key" in error_msg:
+                    st.error("⚠️ Invalid API key. Please check your OpenAI API key.")
+                else:
+                    st.error(f"⚠️ Quiz generation failed: {str(gen_error)[:100]}")
 
 
 # =============================================================================

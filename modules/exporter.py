@@ -7,8 +7,64 @@ Creates professional, print-ready documents with proper formatting.
 
 import io
 import json
+import re
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+
+
+def _sanitize_text_for_pdf(text: str) -> str:
+    """
+    Sanitize text for PDF generation by replacing problematic unicode
+    characters with ASCII equivalents or removing them.
+
+    Args:
+        text: Input text that may contain unicode
+
+    Returns:
+        Sanitized text safe for latin-1 encoding
+    """
+    if not text:
+        return ""
+
+    # Common unicode replacements
+    replacements = {
+        '\u2018': "'",   # Left single quote
+        '\u2019': "'",   # Right single quote
+        '\u201c': '"',   # Left double quote
+        '\u201d': '"',   # Right double quote
+        '\u2013': '-',   # En dash
+        '\u2014': '--',  # Em dash
+        '\u2026': '...', # Ellipsis
+        '\u00a0': ' ',   # Non-breaking space
+        '\u2022': '*',   # Bullet
+        '\u00b7': '*',   # Middle dot
+        '\u2212': '-',   # Minus sign
+        '\u00d7': 'x',   # Multiplication sign
+        '\u00f7': '/',   # Division sign
+        '\u2264': '<=',  # Less than or equal
+        '\u2265': '>=',  # Greater than or equal
+        '\u2260': '!=',  # Not equal
+        '\u00b0': ' deg',# Degree symbol
+        '\u03c0': 'pi',  # Pi
+        '\u00b2': '^2',  # Superscript 2
+        '\u00b3': '^3',  # Superscript 3
+        '\u221a': 'sqrt',# Square root
+        '\u00bd': '1/2', # One half
+        '\u00bc': '1/4', # One quarter
+        '\u00be': '3/4', # Three quarters
+    }
+
+    for unicode_char, replacement in replacements.items():
+        text = text.replace(unicode_char, replacement)
+
+    # Remove any remaining non-latin-1 characters
+    try:
+        text.encode('latin-1')
+    except UnicodeEncodeError:
+        # Replace remaining problematic chars with ?
+        text = text.encode('latin-1', errors='replace').decode('latin-1')
+
+    return text
 
 
 def create_pdf(
@@ -57,8 +113,15 @@ def create_pdf(
             self.set_font('Helvetica', 'I', 8)
             self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
 
+    # Sanitize title
+    title = _sanitize_text_for_pdf(title)
+    subject = _sanitize_text_for_pdf(subject)
+
     pdf = QuizPDF()
     pdf.add_page()
+
+    # Page width for calculations (A4 is 210mm, minus margins)
+    effective_width = 190
 
     # Student Worksheet
     pdf.set_font('Helvetica', 'B', 14)
@@ -76,7 +139,7 @@ def create_pdf(
     # Questions
     for i, q in enumerate(quiz_data, 1):
         q_type = q.get("question_type", "multiple_choice")
-        q_text = q.get("question_text", "")
+        q_text = _sanitize_text_for_pdf(q.get("question_text", ""))
 
         # Question type badge
         type_labels = {
@@ -86,9 +149,10 @@ def create_pdf(
         }
         badge = type_labels.get(q_type, "")
 
-        # Question header
+        # Question header - reset X position before multi_cell
         pdf.set_font('Helvetica', 'B', 11)
-        pdf.multi_cell(0, 7, f"{i}. {badge} {q_text}")
+        pdf.set_x(10)  # Reset to left margin
+        pdf.multi_cell(effective_width, 7, f"{i}. {badge} {q_text}")
 
         # Options based on type
         pdf.set_font('Helvetica', '', 10)
@@ -98,18 +162,22 @@ def create_pdf(
             labels = ["A", "B", "C", "D"]
             for j, opt in enumerate(options):
                 if j < len(labels):
+                    opt_text = _sanitize_text_for_pdf(str(opt))
+                    pdf.set_x(10)  # Reset X
                     pdf.cell(10, 6, '', 0, 0)  # Indent
-                    pdf.cell(0, 6, f"({labels[j]}) {opt}", 0, 1)
+                    pdf.cell(effective_width - 10, 6, f"({labels[j]}) {opt_text}", 0, 1)
             pdf.ln(2)
 
         elif q_type == "true_false":
+            pdf.set_x(10)
             pdf.cell(10, 6, '', 0, 0)
-            pdf.cell(0, 6, "(   ) True    (   ) False", 0, 1)
+            pdf.cell(effective_width - 10, 6, "(   ) True    (   ) False", 0, 1)
             pdf.ln(2)
 
         else:  # short_answer
+            pdf.set_x(10)
             pdf.cell(10, 6, '', 0, 0)
-            pdf.cell(0, 6, "Answer: _________________________________", 0, 1)
+            pdf.cell(effective_width - 10, 6, "Answer: _________________________________", 0, 1)
             pdf.ln(2)
 
         pdf.ln(3)
@@ -131,27 +199,30 @@ def create_pdf(
 
         for i, q in enumerate(quiz_data, 1):
             q_type = q.get("question_type", "multiple_choice")
-            q_text = q.get("question_text", "")
-            correct = q.get("correct_answer", "")
-            explanation = q.get("explanation", "")
+            q_text = _sanitize_text_for_pdf(q.get("question_text", ""))
+            correct = _sanitize_text_for_pdf(str(q.get("correct_answer", "")))
+            explanation = _sanitize_text_for_pdf(q.get("explanation", ""))
 
-            # Question
+            # Question - reset X before multi_cell
             pdf.set_font('Helvetica', 'B', 10)
-            pdf.multi_cell(0, 6, f"{i}. {q_text}")
+            pdf.set_x(10)
+            pdf.multi_cell(effective_width, 6, f"{i}. {q_text}")
 
-            # Correct answer
+            # Correct answer - reset X before multi_cell
             pdf.set_font('Helvetica', '', 10)
             pdf.set_text_color(34, 197, 94)  # Green
+            pdf.set_x(10)
             pdf.cell(10, 6, '', 0, 0)
-            pdf.multi_cell(0, 6, f"Correct Answer: {correct}")
+            pdf.set_x(20)
+            pdf.multi_cell(effective_width - 10, 6, f"Correct Answer: {correct}")
             pdf.set_text_color(0, 0, 0)
 
-            # Explanation
+            # Explanation - reset X before multi_cell
             if explanation:
                 pdf.set_font('Helvetica', 'I', 9)
                 pdf.set_text_color(100, 100, 100)
-                pdf.cell(10, 5, '', 0, 0)
-                pdf.multi_cell(0, 5, f"Explanation: {explanation}")
+                pdf.set_x(20)
+                pdf.multi_cell(effective_width - 10, 5, f"Explanation: {explanation}")
                 pdf.set_text_color(0, 0, 0)
 
             pdf.ln(4)
@@ -343,7 +414,7 @@ def create_json_export(
     return json.dumps(export_data, indent=2, ensure_ascii=False)
 
 
-def import_from_json(json_string: str) -> List[Dict[str, Any]]:
+def import_from_json(json_string: str) -> tuple:
     """
     Import quiz data from a JSON string.
 
@@ -351,16 +422,17 @@ def import_from_json(json_string: str) -> List[Dict[str, Any]]:
         json_string: JSON string containing quiz data
 
     Returns:
-        List of question dictionaries
+        Tuple of (questions_list, metadata_dict)
     """
     try:
         data = json.loads(json_string)
 
         # Handle both formats (with or without metadata wrapper)
         if "questions" in data:
-            return data["questions"]
+            metadata = data.get("metadata", {})
+            return data["questions"], metadata
         elif isinstance(data, list):
-            return data
+            return data, {}
         else:
             raise ValueError("Invalid quiz format")
 
@@ -384,9 +456,15 @@ def create_answer_sheet_pdf(
     """
     from fpdf import FPDF
 
+    # Sanitize title
+    title = _sanitize_text_for_pdf(title)
+
     pdf = FPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=20)
+
+    # Page width for calculations (A4 is 210mm, minus margins)
+    effective_width = 190
 
     # Title
     pdf.set_font('Helvetica', 'B', 16)
@@ -398,9 +476,10 @@ def create_answer_sheet_pdf(
     pdf.cell(0, 8, 'Name: _______________________________    Date: ____________', 0, 1, 'L')
     pdf.ln(10)
 
-    # Instructions
+    # Instructions - reset X before multi_cell
     pdf.set_font('Helvetica', 'I', 9)
-    pdf.multi_cell(0, 5, 'Instructions: Fill in the circle next to your answer choice. For short answer questions, write your response on the line provided.')
+    pdf.set_x(10)
+    pdf.multi_cell(effective_width, 5, 'Instructions: Fill in the circle next to your answer choice. For short answer questions, write your response on the line provided.')
     pdf.ln(8)
 
     pdf.set_font('Helvetica', '', 10)
@@ -408,17 +487,18 @@ def create_answer_sheet_pdf(
     for i, q in enumerate(quiz_data, 1):
         q_type = q.get("question_type", "multiple_choice")
 
+        pdf.set_x(10)  # Reset X position
         if q_type == "multiple_choice":
             pdf.cell(20, 8, f"{i}.", 0, 0, 'R')
-            pdf.cell(0, 8, '(A)     (B)     (C)     (D)', 0, 1, 'L')
+            pdf.cell(effective_width - 20, 8, '(A)     (B)     (C)     (D)', 0, 1, 'L')
 
         elif q_type == "true_false":
             pdf.cell(20, 8, f"{i}.", 0, 0, 'R')
-            pdf.cell(0, 8, '(T)     (F)', 0, 1, 'L')
+            pdf.cell(effective_width - 20, 8, '(T)     (F)', 0, 1, 'L')
 
         else:  # short_answer
             pdf.cell(20, 8, f"{i}.", 0, 0, 'R')
-            pdf.cell(0, 8, '________________________________', 0, 1, 'L')
+            pdf.cell(effective_width - 20, 8, '________________________________', 0, 1, 'L')
 
         if pdf.get_y() > 270:
             pdf.add_page()
