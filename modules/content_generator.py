@@ -7,6 +7,8 @@ with intelligent distractors based on common student misconceptions.
 """
 
 import json
+import math
+import re
 from typing import Dict, Any, List, Optional
 from openai import OpenAI
 import pandas as pd
@@ -411,100 +413,157 @@ def generate_quiz_from_analysis_batched(
     """
     Generate a quiz from a vision analysis result using batched API calls.
 
-    For large question counts (>15), this function splits the request into
-    multiple batches to avoid API limits and improve reliability.
+    This version is *count-accurate*: it will attempt to "top up" missing
+    questions (due to duplicates, invalid outputs, or partial batches) until
+    the requested counts are met or a retry limit is reached.
 
     Args:
         analysis: Result from analyze_notebook_image()
         api_key: OpenAI API key
-        mc_count: Number of multiple choice questions (max 80)
-        tf_count: Number of true/false questions (max 80)
-        sa_count: Number of short answer questions (max 80)
+        mc_count: Number of multiple choice questions
+        tf_count: Number of true/false questions
+        sa_count: Number of short answer questions
         batch_size: Maximum questions per API call (default 15)
-        progress_callback: Optional callback function(current, total) for progress
+        progress_callback: Optional callback(current, total) for UI progress
 
     Returns:
-        List of question dictionaries
+        List of question dictionaries (unique by normalized question_text)
     """
-    text = analysis.get("transcribed_text", "")
-    grade = analysis.get("detected_grade_level", "5")
+    text = analysis.get("transcribed_text", "") or analysis.get("content", "")
+    grade = analysis.get("grade_level", "5")
     subject = analysis.get("subject", "General")
     language = analysis.get("language", "English")
-    core_concept = analysis.get("core_concept", "")
+    core_concept = analysis.get("core_concept", "") or analysis.get("main_topic", "")
 
-    total_requested = mc_count + tf_count + sa_count
+    total_requested = int(mc_count) + int(tf_count) + int(sa_count)
+    all_questions: List[Dict[str, Any]] = []
+    seen_questions = set()
 
-    # For small counts, use the simple method
-    if total_requested <= batch_size:
-        return generate_quiz_from_analysis(
-            analysis, api_key, mc_count, tf_count, sa_count
-        )
+    def _norm(s: str) -> str:
+        s = (s or "").strip().lower()
+        s = re.sub(r"\s+", " ", s)
+        return s
 
-    # Split into batches for each question type
-    all_questions = []
-    seen_questions = set()  # For deduplication
+    def _append_unique(q: Dict[str, Any]) -> bool:
+        q_text = _norm(q.get("question_text", ""))
+        if not q_text:
+            return False
+        if q_text in seen_questions:
+            return False
+        seen_questions.add(q_text)
+        all_questions.append(q)
+        if progress_callback:
+            progress_callback(len(all_questions), total_requested)
+        return True
 
-    def _generate_batch(q_type: str, count: int, existing_count: int):
-        """Generate a batch of questions of a specific type."""
-        if count <= 0:
-            return []
+    def _overshoot_buffer(remaining: int) -> int:
+        # Small overshoot reduces the chance we end short due to duplicates/invalid items.
+        if remaining <= 3:
+            return 2
+        if remaining <= 10:
+            return 3
+        return min(5, max(2, math.ceil(remaining * 0.1)))
 
-        # Calculate batches needed
-        batches = []
-        remaining = count
-        while remaining > 0:
-            batch_count = min(remaining, batch_size)
-            batches.append(batch_count)
-            remaining -= batch_count
+    def _generate_for_type(type_code: str, target: int):
+        if target <= 0:
+            return
 
-        batch_results = []
-        for batch_idx, batch_count in enumerate(batches):
+        expected_type = {
+            "mc": "multiple_choice",
+            "tf": "true_false",
+            "sa": "short_answer",
+        }[type_code]
+
+        # Safety: don't loop forever if the model keeps failing.
+        max_attempts = max(6, math.ceil(target / max(1, batch_size)) + 4)
+        attempts = 0
+        stagnant_rounds = 0  # rounds with zero new unique questions
+
+        while attempts < max_attempts:
+            current_type_count = sum(1 for q in all_questions if q.get("question_type") == expected_type)
+            remaining = target - current_type_count
+            if remaining <= 0:
+                break
+
+            request_n = min(batch_size, remaining + _overshoot_buffer(remaining))
             question_types = {
-                "multiple_choice": batch_count if q_type == "mc" else 0,
-                "true_false": batch_count if q_type == "tf" else 0,
-                "short_answer": batch_count if q_type == "sa" else 0
+                "multiple_choice": request_n if type_code == "mc" else 0,
+                "true_false": request_n if type_code == "tf" else 0,
+                "short_answer": request_n if type_code == "sa" else 0,
             }
 
             try:
-                questions = generate_quiz(
+                batch = generate_quiz(
                     text=text,
                     grade=grade,
-                    num_questions=batch_count,
+                    num_questions=request_n,
                     api_key=api_key,
                     subject=subject,
                     language=language,
                     core_concept=core_concept,
-                    question_types=question_types
+                    question_types=question_types,
                 )
-                batch_results.extend(questions)
-
-                # Report progress
-                if progress_callback:
-                    current = existing_count + len(batch_results)
-                    progress_callback(current, total_requested)
-
             except Exception as e:
-                # Log error but continue with other batches
-                print(f"Batch {batch_idx + 1} failed: {e}")
+                print(f"Batch generation failed for {type_code}: {e}")
+                attempts += 1
                 continue
 
-        return batch_results
+            added = 0
+            for q in (batch or []):
+                # Enforce expected type (models can sometimes mislabel).
+                q["question_type"] = expected_type
+                if _append_unique(q):
+                    added += 1
+                # Stop early if we already reached target for this type.
+                current_type_count = sum(1 for qq in all_questions if qq.get("question_type") == expected_type)
+                if current_type_count >= target:
+                    break
 
-    # Generate each type in sequence
-    mc_questions = _generate_batch("mc", mc_count, 0)
-    tf_questions = _generate_batch("tf", tf_count, len(mc_questions))
-    sa_questions = _generate_batch("sa", sa_count, len(mc_questions) + len(tf_questions))
+            if added == 0:
+                stagnant_rounds += 1
+            else:
+                stagnant_rounds = 0
 
-    # Combine and deduplicate
-    all_raw = mc_questions + tf_questions + sa_questions
+            # If we're not making progress, bail out after a couple rounds.
+            if stagnant_rounds >= 2:
+                break
 
-    for q in all_raw:
-        q_text = q.get("question_text", "").strip().lower()
-        if q_text and q_text not in seen_questions:
-            seen_questions.add(q_text)
-            all_questions.append(q)
+            attempts += 1
 
-    return all_questions
+    # Generate each type with "top-up" behavior
+    _generate_for_type("mc", int(mc_count))
+    _generate_for_type("tf", int(tf_count))
+    _generate_for_type("sa", int(sa_count))
+
+    # Final safety: if we're still short (rare), attempt one generic top-up pass.
+    if len(all_questions) < total_requested:
+        remaining = total_requested - len(all_questions)
+        request_n = min(batch_size, remaining + _overshoot_buffer(remaining))
+        try:
+            batch = generate_quiz(
+                text=text,
+                grade=grade,
+                num_questions=request_n,
+                api_key=api_key,
+                subject=subject,
+                language=language,
+                core_concept=core_concept,
+                question_types={
+                    "multiple_choice": request_n,  # default to MC for filler
+                    "true_false": 0,
+                    "short_answer": 0,
+                },
+            )
+            for q in (batch or []):
+                q["question_type"] = "multiple_choice"
+                _append_unique(q)
+                if len(all_questions) >= total_requested:
+                    break
+        except Exception as e:
+            print(f"Final top-up batch failed: {e}")
+
+    # Trim any overshoot
+    return all_questions[:total_requested]
 
 
 def quiz_to_dataframe(questions: List[Dict[str, Any]]) -> pd.DataFrame:
