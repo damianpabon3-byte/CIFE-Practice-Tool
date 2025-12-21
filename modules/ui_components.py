@@ -458,7 +458,7 @@ def render_card_button(
     clicked = st.button(
         button_text,
         key=key,
-        use_container_width=True,
+        width="stretch",
         disabled=disabled
     )
 
@@ -539,7 +539,7 @@ def render_option_card(
     clicked = st.button(
         f"Select {option_label}",
         key=key,
-        use_container_width=True,
+        width="stretch",
         disabled=disabled
     )
 
