@@ -300,7 +300,7 @@ def render_sidebar():
             render_info_box("API key required to proceed (set OPENAI_API_KEY in Streamlit Secrets)", variant="warning", icon="⚠️")
 # Reset button
         st.divider()
-        if st.button("🔄 Start Over", use_container_width=True):
+        if st.button("🔄 Start Over", width="stretch"):
             reset_to_setup()
             st.rerun()
 
@@ -422,7 +422,7 @@ def render_ingestion_step(api_key: str):
                 cols = st.columns(min(len(uploaded_files), 4))
                 for i, file in enumerate(uploaded_files[:4]):
                     with cols[i]:
-                        st.image(file, caption=f"Image {i+1}", use_container_width=True)
+                        st.image(file, caption=f"Image {i+1}", width="stretch")
 
         with col2:
             render_card(
@@ -443,7 +443,7 @@ def render_ingestion_step(api_key: str):
         with col2:
             if st.button(
                 "🔍 Analyze Notebook →",
-                use_container_width=True,
+                width="stretch",
                 disabled=not uploaded_files or not api_key
             ):
                 st.session_state.wizard_step = STEP_EXTRACTION
@@ -520,7 +520,7 @@ def render_ingestion_step(api_key: str):
 
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        if st.button("✏️ Edit Quiz", use_container_width=True, key="json_edit"):
+                        if st.button("✏️ Edit Quiz", width="stretch", key="json_edit"):
                             # Restore quiz data and metadata
                             st.session_state.quiz_data = questions
                             st.session_state.quiz_df = quiz_to_dataframe(questions)
@@ -534,7 +534,7 @@ def render_ingestion_step(api_key: str):
                             st.rerun()
 
                     with col2:
-                        if st.button("🎮 Play Now", use_container_width=True, key="json_play"):
+                        if st.button("🎮 Play Now", width="stretch", key="json_play"):
                             # Restore and go to play
                             st.session_state.quiz_data = questions
                             st.session_state.quiz_df = quiz_to_dataframe(questions)
@@ -552,7 +552,7 @@ def render_ingestion_step(api_key: str):
                         has_progress = game_state and game_state.get("current_index", 0) > 0
                         if st.button(
                             "▶️ Resume" if has_progress else "🎮 Start Fresh",
-                            use_container_width=True,
+                            width="stretch",
                             key="json_resume",
                             disabled=not has_progress
                         ):
@@ -612,7 +612,7 @@ def render_extraction_step(api_key: str):
     col_cache1, col_cache2 = st.columns([3, 1])
     with col_cache2:
         if st.session_state.analysis_result is not None:
-            if st.button("🔄 Re-analyze", key="reanalyze_btn", use_container_width=True):
+            if st.button("🔄 Re-analyze", key="reanalyze_btn", width="stretch"):
                 st.session_state.analysis_signature = None
                 st.session_state.analysis_result = None
                 st.rerun()
@@ -670,11 +670,11 @@ def render_extraction_step(api_key: str):
                 render_info_box(f"Analysis failed: {str(e)}", variant="error", icon="❌")
                 col_retry1, col_retry2 = st.columns(2)
                 with col_retry1:
-                    if st.button("← Back to Upload", use_container_width=True):
+                    if st.button("← Back to Upload", width="stretch"):
                         st.session_state.wizard_step = STEP_INGESTION
                         st.rerun()
                 with col_retry2:
-                    if st.button("🔄 Retry Analysis", use_container_width=True):
+                    if st.button("🔄 Retry Analysis", width="stretch"):
                         st.rerun()
                 return
     else:
@@ -793,7 +793,7 @@ def render_extraction_step(api_key: str):
         st.markdown("---")
         col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
         with col_btn1:
-            back_btn = st.form_submit_button("← Back to Upload", use_container_width=True)
+            back_btn = st.form_submit_button("← Back to Upload", width="stretch")
         with col_btn2:
             # Placeholder for spacing
             pass
@@ -801,7 +801,7 @@ def render_extraction_step(api_key: str):
             generate_btn = st.form_submit_button(
                 "🚀 Generate Quiz",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 disabled=(total == 0)
             )
 
@@ -880,7 +880,7 @@ def render_extraction_step(api_key: str):
             else:
                 status_container.error(f"⚠️ Quiz generation failed: {str(gen_error)[:150]}")
             # Show retry button
-            if st.button("🔄 Retry Generation", use_container_width=True):
+            if st.button("🔄 Retry Generation", width="stretch"):
                 st.rerun()
 
 
@@ -926,7 +926,7 @@ def render_editor_step():
     if st.session_state.quiz_df is not None:
         edited_df = st.data_editor(
             st.session_state.quiz_df,
-            use_container_width=True,
+            width="stretch",
             num_rows="dynamic",
             column_config={
                 "Index": st.column_config.NumberColumn("Q#", disabled=True, width="small"),
@@ -973,7 +973,7 @@ def render_editor_step():
     col1, col2, col3 = st.columns([1, 1, 1])
 
     with col1:
-        if st.button("← Back to Extraction", use_container_width=True):
+        if st.button("← Back to Extraction", width="stretch"):
             st.session_state.wizard_step = STEP_EXTRACTION
             st.rerun()
 
@@ -983,7 +983,7 @@ def render_editor_step():
         st.info(f"📊 {total_q} questions ready")
 
     with col3:
-        if st.button("Continue to Play →", use_container_width=True, type="primary"):
+        if st.button("Continue to Play →", width="stretch", type="primary"):
             st.session_state.wizard_step = STEP_PLAY
             st.session_state.game_mode = "setup"
             st.rerun()
@@ -1033,7 +1033,7 @@ def render_action_step():
             variant="success"
         )
 
-        if st.button("🎮 Start Playing", use_container_width=True, key="play_btn"):
+        if st.button("🎮 Start Playing", width="stretch", key="play_btn"):
             start_game()
             st.rerun()
 
@@ -1069,7 +1069,7 @@ def render_action_step():
                     data=pdf_student,
                     file_name=get_download_filename(st.session_state.quiz_title + "_Student", "pdf"),
                     mime="application/pdf",
-                    use_container_width=True
+                    width="stretch"
                 )
             except Exception as e:
                 render_info_box(f"PDF error: {str(e)[:50]}", variant="error", icon="⚠️")
@@ -1089,7 +1089,7 @@ def render_action_step():
                     data=pdf_teacher,
                     file_name=get_download_filename(st.session_state.quiz_title + "_Teacher", "pdf"),
                     mime="application/pdf",
-                    use_container_width=True
+                    width="stretch"
                 )
             except Exception as e:
                 render_info_box(f"PDF error: {str(e)[:50]}", variant="error", icon="⚠️")
@@ -1110,7 +1110,7 @@ def render_action_step():
                     data=docx_file,
                     file_name=get_download_filename(st.session_state.quiz_title, "docx"),
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True
+                    width="stretch"
                 )
             except Exception as e:
                 render_info_box(f"DOCX error: {str(e)[:50]}", variant="error", icon="⚠️")
@@ -1134,7 +1134,7 @@ def render_action_step():
                 data=json_data,
                 file_name=get_download_filename(st.session_state.quiz_title, "json"),
                 mime="application/json",
-                use_container_width=True
+                width="stretch"
             )
 
     # Back button
@@ -1235,14 +1235,14 @@ def render_play_mode():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             if current_idx + 1 < total_questions:
-                if st.button("Next Question →", use_container_width=True):
+                if st.button("Next Question →", width="stretch"):
                     st.session_state.current_question_index += 1
                     st.session_state.answer_submitted = False
                     st.session_state.selected_answer = None
                     st.session_state.user_text_answer = ""
                     st.rerun()
             else:
-                if st.button("🏆 See Results", use_container_width=True):
+                if st.button("🏆 See Results", width="stretch"):
                     st.session_state.wizard_step = STEP_RESULTS
                     st.rerun()
 
@@ -1259,7 +1259,7 @@ def render_mc_options(question: dict):
             if st.button(
                 f"{labels[i]}. {opt}",
                 key=f"mc_opt_{i}",
-                use_container_width=True
+                width="stretch"
             ):
                 st.session_state.selected_answer = i
                 process_answer(question, i)
@@ -1271,13 +1271,13 @@ def render_tf_options(question: dict):
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("✓ True", key="tf_true", use_container_width=True):
+        if st.button("✓ True", key="tf_true", width="stretch"):
             st.session_state.selected_answer = 0
             process_answer(question, 0)
             st.rerun()
 
     with col2:
-        if st.button("✗ False", key="tf_false", use_container_width=True):
+        if st.button("✗ False", key="tf_false", width="stretch"):
             st.session_state.selected_answer = 1
             process_answer(question, 1)
             st.rerun()
@@ -1293,7 +1293,7 @@ def render_sa_input(question: dict):
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("Submit Answer", use_container_width=True, disabled=not user_answer):
+        if st.button("Submit Answer", width="stretch", disabled=not user_answer):
             st.session_state.user_text_answer = user_answer
             process_answer(question, -1, user_answer)
             st.rerun()
@@ -1389,18 +1389,18 @@ def render_results_step():
     col1, col2, col3 = st.columns([1, 1, 1])
 
     with col1:
-        if st.button("🔄 Play Again", use_container_width=True):
+        if st.button("🔄 Play Again", width="stretch"):
             start_game()
             st.rerun()
 
     with col2:
-        if st.button("✏️ Edit Quiz", use_container_width=True):
+        if st.button("✏️ Edit Quiz", width="stretch"):
             st.session_state.game_mode = "setup"
             st.session_state.wizard_step = STEP_EDITOR
             st.rerun()
 
     with col3:
-        if st.button("📚 New Quiz", use_container_width=True):
+        if st.button("📚 New Quiz", width="stretch"):
             reset_to_setup()
             st.rerun()
 
