@@ -350,6 +350,114 @@ def generate_quiz_from_analysis(
     )
 
 
+def generate_quiz_from_analysis_batched(
+    analysis: Dict[str, Any],
+    api_key: str,
+    mc_count: int = 5,
+    tf_count: int = 3,
+    sa_count: int = 2,
+    batch_size: int = 15,
+    progress_callback: Optional[callable] = None
+) -> List[Dict[str, Any]]:
+    """
+    Generate a quiz from a vision analysis result using batched API calls.
+
+    For large question counts (>15), this function splits the request into
+    multiple batches to avoid API limits and improve reliability.
+
+    Args:
+        analysis: Result from analyze_notebook_image()
+        api_key: OpenAI API key
+        mc_count: Number of multiple choice questions (max 80)
+        tf_count: Number of true/false questions (max 80)
+        sa_count: Number of short answer questions (max 80)
+        batch_size: Maximum questions per API call (default 15)
+        progress_callback: Optional callback function(current, total) for progress
+
+    Returns:
+        List of question dictionaries
+    """
+    text = analysis.get("transcribed_text", "")
+    grade = analysis.get("detected_grade_level", "5")
+    subject = analysis.get("subject", "General")
+    language = analysis.get("language", "English")
+    core_concept = analysis.get("core_concept", "")
+
+    total_requested = mc_count + tf_count + sa_count
+
+    # For small counts, use the simple method
+    if total_requested <= batch_size:
+        return generate_quiz_from_analysis(
+            analysis, api_key, mc_count, tf_count, sa_count
+        )
+
+    # Split into batches for each question type
+    all_questions = []
+    seen_questions = set()  # For deduplication
+
+    def _generate_batch(q_type: str, count: int, existing_count: int):
+        """Generate a batch of questions of a specific type."""
+        if count <= 0:
+            return []
+
+        # Calculate batches needed
+        batches = []
+        remaining = count
+        while remaining > 0:
+            batch_count = min(remaining, batch_size)
+            batches.append(batch_count)
+            remaining -= batch_count
+
+        batch_results = []
+        for batch_idx, batch_count in enumerate(batches):
+            question_types = {
+                "multiple_choice": batch_count if q_type == "mc" else 0,
+                "true_false": batch_count if q_type == "tf" else 0,
+                "short_answer": batch_count if q_type == "sa" else 0
+            }
+
+            try:
+                questions = generate_quiz(
+                    text=text,
+                    grade=grade,
+                    num_questions=batch_count,
+                    api_key=api_key,
+                    subject=subject,
+                    language=language,
+                    core_concept=core_concept,
+                    question_types=question_types
+                )
+                batch_results.extend(questions)
+
+                # Report progress
+                if progress_callback:
+                    current = existing_count + len(batch_results)
+                    progress_callback(current, total_requested)
+
+            except Exception as e:
+                # Log error but continue with other batches
+                print(f"Batch {batch_idx + 1} failed: {e}")
+                continue
+
+        return batch_results
+
+    # Generate each type in sequence
+    mc_questions = _generate_batch("mc", mc_count, 0)
+    tf_questions = _generate_batch("tf", tf_count, len(mc_questions))
+    sa_questions = _generate_batch("sa", sa_count, len(mc_questions) + len(tf_questions))
+
+    # Combine and deduplicate
+    all_raw = mc_questions + tf_questions + sa_questions
+
+    for q in all_raw:
+        q_text = q.get("question_text", "").strip().lower()
+        if q_text and q_text not in seen_questions:
+            seen_questions.add(q_text)
+            all_questions.append(q)
+
+    return all_questions
+
+
 def quiz_to_dataframe(questions: List[Dict[str, Any]]) -> pd.DataFrame:
     """
     Convert a list of questions to a Pandas DataFrame for editing.
