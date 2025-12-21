@@ -8,10 +8,14 @@ This file acts as a strict Router and State Manager that delegates
 all visual rendering to the specialized UI module (modules/ui_components.py).
 
 Wizard Workflow (4-Step Linear Path):
-1. Ingestion: Teacher uploads notebook image(s)
-2. Extraction: GPT-4o Vision transcribes and identifies content
+1. Ingestion: Teacher uploads notebook image(s) or loads saved quiz
+2. Extraction: GPT-4o Vision transcribes and identifies content (cached)
 3. Editor: Human-in-the-Loop review with st.data_editor
 4. Publication/Play: Interactive game or download PDF/DOCX
+
+Two-Stage Pipeline for Cost Control:
+- Stage A: Notebook photos → analysis_result (cached by upload signature)
+- Stage B: analysis_result + quiz_settings → quiz_data (form-gated)
 
 Author: CIFE Educational Technology
 """
@@ -20,7 +24,9 @@ import streamlit as st
 import pandas as pd
 import json
 import os
-from typing import Optional
+import hashlib
+from datetime import datetime
+from typing import Optional, Dict, Any, List, Tuple
 
 # =============================================================================
 # Import UI Components - Strict alignment with modules/ui_components.py
@@ -66,7 +72,8 @@ from modules.exporter import (
     create_docx,
     create_json_export,
     get_download_filename,
-    import_from_json
+    import_from_json,
+    QUIZ_SCHEMA_VERSION
 )
 
 
@@ -188,6 +195,24 @@ def init_session_state():
     if "animations_enabled" not in st.session_state:
         st.session_state.animations_enabled = True
 
+    # Generation state tracking (for two-stage pipeline)
+    if "generation_in_progress" not in st.session_state:
+        st.session_state.generation_in_progress = False
+
+    if "generation_progress" not in st.session_state:
+        st.session_state.generation_progress = 0
+
+    if "last_generation_settings" not in st.session_state:
+        st.session_state.last_generation_settings = None
+
+    # Quiz difficulty setting
+    if "quiz_difficulty" not in st.session_state:
+        st.session_state.quiz_difficulty = "medium"
+
+    # Language preference
+    if "quiz_language" not in st.session_state:
+        st.session_state.quiz_language = "auto"
+
 
 def get_current_step_index() -> int:
     """Get the current wizard step index for visual progress."""
@@ -275,7 +300,7 @@ def render_sidebar():
             render_info_box("API key required to proceed (set OPENAI_API_KEY in Streamlit Secrets)", variant="warning", icon="⚠️")
 # Reset button
         st.divider()
-        if st.button("🔄 Start Over", width="stretch"):
+        if st.button("🔄 Start Over", use_container_width=True):
             reset_to_setup()
             st.rerun()
 
@@ -286,17 +311,63 @@ def render_sidebar():
 # Helper: Compute upload signature for caching
 # =============================================================================
 def _compute_upload_signature(files) -> str:
-    """Compute a signature from uploaded files to detect changes."""
-    import hashlib
+    """
+    Compute a signature from uploaded files to detect changes.
+    Uses MD5 hash of file contents for reliable change detection.
+    """
     if not files:
         return ""
     sig_parts = []
     for f in files:
-        f.seek(0)
-        content = f.read()
-        f.seek(0)
-        sig_parts.append(f"{f.name}:{len(content)}:{hashlib.md5(content).hexdigest()[:8]}")
+        try:
+            f.seek(0)
+            content = f.read()
+            f.seek(0)
+            file_hash = hashlib.md5(content).hexdigest()[:12]
+            sig_parts.append(f"{f.name}:{len(content)}:{file_hash}")
+        except Exception:
+            sig_parts.append(f"{f.name}:unknown")
     return "|".join(sorted(sig_parts))
+
+
+def _validate_quiz_data(quiz_data: List[Dict]) -> Tuple[bool, List[str]]:
+    """
+    Validate quiz data structure and return validation status with warnings.
+
+    Returns:
+        Tuple of (is_valid, list_of_warnings)
+    """
+    warnings = []
+    if not quiz_data:
+        return False, ["No questions found"]
+
+    for i, q in enumerate(quiz_data):
+        q_num = i + 1
+        q_type = q.get("question_type", "")
+
+        # Check required fields
+        if not q.get("question_text"):
+            warnings.append(f"Q{q_num}: Missing question text")
+
+        if not q.get("correct_answer"):
+            warnings.append(f"Q{q_num}: Missing correct answer")
+
+        # Type-specific validation
+        if q_type == "multiple_choice":
+            options = q.get("options", [])
+            if len(options) < 2:
+                warnings.append(f"Q{q_num}: MC needs at least 2 options")
+            correct = q.get("correct_answer", "")
+            if correct and correct not in options:
+                warnings.append(f"Q{q_num}: Correct answer not in options")
+
+        elif q_type == "true_false":
+            correct = str(q.get("correct_answer", "")).lower()
+            if correct not in ["true", "false", "verdadero", "falso"]:
+                warnings.append(f"Q{q_num}: T/F answer must be True/False")
+
+    is_valid = len([w for w in warnings if "Missing" in w]) == 0
+    return is_valid, warnings
 
 
 # =============================================================================
@@ -351,7 +422,7 @@ def render_ingestion_step(api_key: str):
                 cols = st.columns(min(len(uploaded_files), 4))
                 for i, file in enumerate(uploaded_files[:4]):
                     with cols[i]:
-                        st.image(file, caption=f"Image {i+1}", width="stretch")
+                        st.image(file, caption=f"Image {i+1}", use_container_width=True)
 
         with col2:
             render_card(
@@ -372,7 +443,7 @@ def render_ingestion_step(api_key: str):
         with col2:
             if st.button(
                 "🔍 Analyze Notebook →",
-                width="stretch",
+                use_container_width=True,
                 disabled=not uploaded_files or not api_key
             ):
                 st.session_state.wizard_step = STEP_EXTRACTION
@@ -383,7 +454,7 @@ def render_ingestion_step(api_key: str):
             content="""
             <p style="color: #6B7280; margin: 0;">
                 Load a previously saved quiz (.json file) to edit or play again.
-                This skips the analysis step and goes directly to editing.
+                This restores all quiz data including any saved game progress.
             </p>
             """,
             title="💾 Load Saved Quiz"
@@ -398,56 +469,131 @@ def render_ingestion_step(api_key: str):
         if json_file:
             try:
                 json_content = json_file.read().decode("utf-8")
-                questions, metadata = import_from_json(json_content)
+                questions, metadata, analysis, quiz_settings, game_state = import_from_json(json_content)
 
                 if not questions:
-                    st.error("No questions found in the JSON file.")
+                    st.error("No questions found in the JSON file. Please check the file format.")
                 else:
+                    # Validate the quiz data
+                    is_valid, warnings = _validate_quiz_data(questions)
+
                     render_info_box(
                         f"Found {len(questions)} questions in the saved quiz",
                         variant="success",
                         icon="✓"
                     )
 
+                    # Show schema version info
+                    schema_ver = metadata.get("schema_version", "1.0")
+                    if schema_ver != QUIZ_SCHEMA_VERSION:
+                        render_info_box(
+                            f"Quiz format version {schema_ver} (current: {QUIZ_SCHEMA_VERSION})",
+                            variant="info",
+                            icon="ℹ️"
+                        )
+
                     # Show metadata preview
                     if metadata:
-                        st.write(f"**Title:** {metadata.get('title', 'Untitled')}")
-                        st.write(f"**Subject:** {metadata.get('subject', 'N/A')}")
-                        st.write(f"**Grade:** {metadata.get('grade', 'N/A')}")
+                        col_meta1, col_meta2, col_meta3 = st.columns(3)
+                        with col_meta1:
+                            st.markdown(f"**Title:** {metadata.get('title', 'Untitled')}")
+                        with col_meta2:
+                            st.markdown(f"**Subject:** {metadata.get('subject', 'N/A')}")
+                        with col_meta3:
+                            st.markdown(f"**Grade:** {metadata.get('grade', 'N/A')}")
 
-                    col1, col2 = st.columns(2)
+                    # Show validation warnings
+                    if warnings:
+                        with st.expander(f"⚠️ {len(warnings)} validation warning(s)"):
+                            for w in warnings[:10]:
+                                st.warning(w)
+                            if len(warnings) > 10:
+                                st.info(f"...and {len(warnings) - 10} more")
+
+                    # Show game state if available
+                    if game_state and game_state.get("current_index", 0) > 0:
+                        render_info_box(
+                            f"Saved progress found: Question {game_state.get('current_index', 0) + 1}, Score: {game_state.get('score', 0)}",
+                            variant="info",
+                            icon="📊"
+                        )
+
+                    col1, col2, col3 = st.columns(3)
                     with col1:
-                        if st.button("✏️ Edit Quiz", width="stretch", key="json_edit"):
+                        if st.button("✏️ Edit Quiz", use_container_width=True, key="json_edit"):
                             # Restore quiz data and metadata
                             st.session_state.quiz_data = questions
                             st.session_state.quiz_df = quiz_to_dataframe(questions)
                             st.session_state.quiz_title = metadata.get("title", "Imported Quiz")
                             st.session_state.quiz_subject = metadata.get("subject", "")
                             st.session_state.quiz_grade = metadata.get("grade", "")
+                            # Restore analysis if available
+                            if analysis:
+                                st.session_state.analysis_result = analysis
                             st.session_state.wizard_step = STEP_EDITOR
                             st.rerun()
 
                     with col2:
-                        if st.button("🎮 Play Now", width="stretch", key="json_play"):
+                        if st.button("🎮 Play Now", use_container_width=True, key="json_play"):
                             # Restore and go to play
                             st.session_state.quiz_data = questions
                             st.session_state.quiz_df = quiz_to_dataframe(questions)
                             st.session_state.quiz_title = metadata.get("title", "Imported Quiz")
                             st.session_state.quiz_subject = metadata.get("subject", "")
                             st.session_state.quiz_grade = metadata.get("grade", "")
+                            if analysis:
+                                st.session_state.analysis_result = analysis
                             st.session_state.wizard_step = STEP_PLAY
                             st.session_state.game_mode = "setup"
                             st.rerun()
 
+                    with col3:
+                        # Resume option if game state exists
+                        has_progress = game_state and game_state.get("current_index", 0) > 0
+                        if st.button(
+                            "▶️ Resume" if has_progress else "🎮 Start Fresh",
+                            use_container_width=True,
+                            key="json_resume",
+                            disabled=not has_progress
+                        ):
+                            # Restore everything including game state
+                            st.session_state.quiz_data = questions
+                            st.session_state.quiz_df = quiz_to_dataframe(questions)
+                            st.session_state.quiz_title = metadata.get("title", "Imported Quiz")
+                            st.session_state.quiz_subject = metadata.get("subject", "")
+                            st.session_state.quiz_grade = metadata.get("grade", "")
+                            if analysis:
+                                st.session_state.analysis_result = analysis
+                            # Restore game state
+                            if game_state:
+                                st.session_state.current_question_index = game_state.get("current_index", 0)
+                                st.session_state.score = game_state.get("score", 0)
+                                st.session_state.streak = game_state.get("streak", 0)
+                                st.session_state.max_streak = game_state.get("max_streak", 0)
+                                st.session_state.wrong_answers = game_state.get("wrong_answers", [])
+                            st.session_state.wizard_step = STEP_PLAY
+                            st.session_state.game_mode = "play"
+                            st.rerun()
+
+            except json.JSONDecodeError as e:
+                st.error(f"Invalid JSON format: {str(e)}")
+                render_info_box("The file doesn't appear to be valid JSON. Please check the file.", variant="error")
             except Exception as e:
                 st.error(f"Failed to load quiz: {str(e)}")
+                render_info_box("Try re-exporting the quiz or contact support.", variant="warning")
 
 
 # =============================================================================
-# Step 2: Extraction (Analyze)
+# Step 2: Extraction (Analyze) - STAGE A of Two-Stage Pipeline
 # =============================================================================
 def render_extraction_step(api_key: str):
-    """Render the analysis (Extraction) step with progress."""
+    """
+    Render the analysis (Extraction) step with progress.
+
+    STAGE A: Notebook photos → analysis_result
+    - Only runs when uploads changed OR user clicks "Re-analyze"
+    - Results are cached by upload_signature
+    """
 
     render_header(
         "Analyzing Notebook",
@@ -462,6 +608,15 @@ def render_extraction_step(api_key: str):
     cached_sig = st.session_state.analysis_signature
     need_analysis = (current_sig != cached_sig) or (st.session_state.analysis_result is None)
 
+    # Add Re-analyze button for manual refresh
+    col_cache1, col_cache2 = st.columns([3, 1])
+    with col_cache2:
+        if st.session_state.analysis_result is not None:
+            if st.button("🔄 Re-analyze", key="reanalyze_btn", use_container_width=True):
+                st.session_state.analysis_signature = None
+                st.session_state.analysis_result = None
+                st.rerun()
+
     if need_analysis:
         with st.spinner("Analyzing images..."):
             try:
@@ -472,6 +627,10 @@ def render_extraction_step(api_key: str):
                 # Validate API key before calling OpenAI
                 if not api_key or len(api_key.strip()) < 10:
                     raise ValueError("Invalid API key. Please provide a valid OpenAI API key.")
+
+                # Check for uploaded files
+                if not st.session_state.uploaded_files:
+                    raise ValueError("No images uploaded. Please go back and upload notebook images.")
 
                 # Analyze images with defensive error handling
                 try:
@@ -502,18 +661,24 @@ def render_extraction_step(api_key: str):
                 st.session_state.analysis_signature = current_sig
                 st.session_state.quiz_subject = analysis.get("subject", "General")
                 st.session_state.quiz_grade = analysis.get("detected_grade_level", "5")
+                st.session_state.quiz_language = analysis.get("language", "English")
 
                 progress_placeholder.empty()
-                render_info_box("Analysis complete!", variant="success", icon="✅")
+                render_info_box("Analysis complete! Configure your quiz below.", variant="success", icon="✅")
 
             except Exception as e:
                 render_info_box(f"Analysis failed: {str(e)}", variant="error", icon="❌")
-                if st.button("← Try Again"):
-                    st.session_state.wizard_step = STEP_INGESTION
-                    st.rerun()
+                col_retry1, col_retry2 = st.columns(2)
+                with col_retry1:
+                    if st.button("← Back to Upload", use_container_width=True):
+                        st.session_state.wizard_step = STEP_INGESTION
+                        st.rerun()
+                with col_retry2:
+                    if st.button("🔄 Retry Analysis", use_container_width=True):
+                        st.rerun()
                 return
     else:
-        render_info_box("Using cached analysis (same images detected)", variant="info", icon="📋")
+        render_info_box("Using cached analysis (same images detected). Click 'Re-analyze' to refresh.", variant="info", icon="📋")
 
     # Get analysis from session state
     analysis = st.session_state.analysis_result
@@ -555,48 +720,90 @@ def render_extraction_step(api_key: str):
             key_terms = ", ".join(analysis.get("key_terms", []))
             render_info_box(f"Key Terms: {key_terms}", variant="info", icon="🏷️")
 
-    # Question configuration inside a form
+    # ==========================================================================
+    # STAGE B: Quiz Configuration Form (form-gated to prevent rerun triggers)
+    # ==========================================================================
     render_card(
-        content="<p style='margin:0; color:#6B7280;'>Configure the number of questions to generate (max 80 per type)</p>",
-        title="📝 Quiz Configuration"
+        content="<p style='margin:0; color:#6B7280;'>Configure the number of questions to generate. Use the form below to prevent accidental re-generation.</p>",
+        title="📝 Quiz Configuration (up to 80 per type)"
     )
 
-    with st.form("quiz_config_form"):
+    with st.form("quiz_config_form", clear_on_submit=False):
+        # Question type counts
         col1, col2, col3 = st.columns(3)
 
         with col1:
             mc_count = st.number_input(
-                "Multiple Choice Questions",
+                "Multiple Choice",
                 min_value=0,
                 max_value=80,
-                value=st.session_state.mc_count
+                value=st.session_state.mc_count,
+                help="4-option questions with one correct answer"
             )
 
         with col2:
             tf_count = st.number_input(
-                "True/False Questions",
+                "True/False",
                 min_value=0,
                 max_value=80,
-                value=st.session_state.tf_count
+                value=st.session_state.tf_count,
+                help="Simple true or false statements"
             )
 
         with col3:
             sa_count = st.number_input(
-                "Short Answer Questions",
+                "Short Answer",
                 min_value=0,
                 max_value=80,
-                value=st.session_state.sa_count
+                value=st.session_state.sa_count,
+                help="1-3 word fill-in-the-blank answers"
             )
 
         total = mc_count + tf_count + sa_count
-        st.info(f"📊 Total questions: {total}")
+
+        # Additional options
+        col_opt1, col_opt2 = st.columns(2)
+        with col_opt1:
+            difficulty = st.selectbox(
+                "Difficulty Level",
+                options=["easy", "medium", "hard"],
+                index=["easy", "medium", "hard"].index(st.session_state.quiz_difficulty),
+                help="Adjusts question complexity"
+            )
+        with col_opt2:
+            detected_lang = analysis.get("language", "English") if analysis else "English"
+            language = st.selectbox(
+                "Language",
+                options=["auto", "English", "Spanish"],
+                index=0,
+                help=f"Detected: {detected_lang}"
+            )
+
+        # Show total and batch info
+        if total > 0:
+            batch_count = (total - 1) // 15 + 1
+            if total > 15:
+                st.info(f"📊 Total: {total} questions ({batch_count} batches of ~15 each)")
+            else:
+                st.info(f"📊 Total: {total} questions")
+        else:
+            st.warning("⚠️ Select at least one question type")
 
         # Form buttons
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            back_btn = st.form_submit_button("← Back to Ingestion")
-        with col2:
-            generate_btn = st.form_submit_button("Generate Quiz →", disabled=(total == 0))
+        st.markdown("---")
+        col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
+        with col_btn1:
+            back_btn = st.form_submit_button("← Back to Upload", use_container_width=True)
+        with col_btn2:
+            # Placeholder for spacing
+            pass
+        with col_btn3:
+            generate_btn = st.form_submit_button(
+                "🚀 Generate Quiz",
+                type="primary",
+                use_container_width=True,
+                disabled=(total == 0)
+            )
 
     # Handle form submissions outside the form
     if back_btn:
@@ -608,31 +815,73 @@ def render_extraction_step(api_key: str):
         st.session_state.mc_count = mc_count
         st.session_state.tf_count = tf_count
         st.session_state.sa_count = sa_count
+        st.session_state.quiz_difficulty = difficulty
+        st.session_state.quiz_language = language if language != "auto" else analysis.get("language", "English")
+
+        # Store generation settings for reference
+        st.session_state.last_generation_settings = {
+            "mc_count": mc_count,
+            "tf_count": tf_count,
+            "sa_count": sa_count,
+            "difficulty": difficulty,
+            "language": st.session_state.quiz_language,
+            "timestamp": datetime.now().isoformat()
+        }
 
         # Generate quiz with batched generation for large counts
-        with st.spinner(f"Generating {total} questions..."):
-            try:
-                questions = generate_quiz_from_analysis_batched(
-                    analysis,
-                    api_key,
-                    mc_count=mc_count,
-                    tf_count=tf_count,
-                    sa_count=sa_count
-                )
-                if not questions:
-                    raise ValueError("No questions were generated. Please try again.")
-                st.session_state.quiz_data = questions
-                st.session_state.quiz_df = quiz_to_dataframe(questions)
-                st.session_state.wizard_step = STEP_EDITOR
+        progress_container = st.empty()
+        status_container = st.empty()
+
+        def update_progress(current: int, total: int):
+            """Callback to update progress bar during batched generation."""
+            progress = current / total if total > 0 else 0
+            progress_container.progress(progress, text=f"Generating questions: {current}/{total}")
+
+        try:
+            status_container.info(f"🔄 Generating {total} questions...")
+
+            questions = generate_quiz_from_analysis_batched(
+                analysis,
+                api_key,
+                mc_count=mc_count,
+                tf_count=tf_count,
+                sa_count=sa_count,
+                batch_size=15,
+                progress_callback=update_progress
+            )
+
+            progress_container.empty()
+
+            if not questions:
+                raise ValueError("No questions were generated. Please try again.")
+
+            # Validate generated questions
+            is_valid, warnings = _validate_quiz_data(questions)
+            if warnings:
+                status_container.warning(f"Generated {len(questions)} questions with {len(warnings)} validation notes")
+            else:
+                status_container.success(f"✅ Successfully generated {len(questions)} questions!")
+
+            st.session_state.quiz_data = questions
+            st.session_state.quiz_df = quiz_to_dataframe(questions)
+            st.session_state.wizard_step = STEP_EDITOR
+            st.rerun()
+
+        except Exception as gen_error:
+            progress_container.empty()
+            error_msg = str(gen_error).lower()
+            if "rate limit" in error_msg or "429" in error_msg:
+                status_container.error("⚠️ Rate limit exceeded. Please wait a moment and try again.")
+                render_info_box("OpenAI rate limits reset after a short wait. Try again in 30-60 seconds.", variant="warning")
+            elif "invalid" in error_msg and "key" in error_msg:
+                status_container.error("⚠️ Invalid API key. Please check your OpenAI API key in the sidebar.")
+            elif "timeout" in error_msg:
+                status_container.error("⚠️ Request timed out. Try generating fewer questions at once.")
+            else:
+                status_container.error(f"⚠️ Quiz generation failed: {str(gen_error)[:150]}")
+            # Show retry button
+            if st.button("🔄 Retry Generation", use_container_width=True):
                 st.rerun()
-            except Exception as gen_error:
-                error_msg = str(gen_error).lower()
-                if "rate limit" in error_msg or "429" in error_msg:
-                    st.error("⚠️ Rate limit exceeded. Please wait a moment and try again.")
-                elif "invalid" in error_msg and "key" in error_msg:
-                    st.error("⚠️ Invalid API key. Please check your OpenAI API key.")
-                else:
-                    st.error(f"⚠️ Quiz generation failed: {str(gen_error)[:100]}")
 
 
 # =============================================================================
@@ -642,6 +891,7 @@ def render_editor_step():
     """
     Render the question editing step with Human-in-the-Loop st.data_editor.
     Teacher Mode: Content verification before Play mode begins.
+    Supports: multiple_choice, true_false, short_answer, matching, fill_in_blank
     """
 
     render_header(
@@ -662,27 +912,38 @@ def render_editor_step():
         variant="warning"
     )
 
+    # Show validation warnings if any
+    if st.session_state.quiz_data:
+        is_valid, warnings = _validate_quiz_data(st.session_state.quiz_data)
+        if warnings:
+            with st.expander(f"⚠️ {len(warnings)} validation issue(s) - Click to review"):
+                for w in warnings[:15]:
+                    st.warning(w)
+                if len(warnings) > 15:
+                    st.info(f"...and {len(warnings) - 15} more")
+
     # Data editor for questions - Human-in-the-Loop verification
     if st.session_state.quiz_df is not None:
         edited_df = st.data_editor(
             st.session_state.quiz_df,
-            width="stretch",
+            use_container_width=True,
             num_rows="dynamic",
             column_config={
-                "Index": st.column_config.NumberColumn("Q#", disabled=True),
+                "Index": st.column_config.NumberColumn("Q#", disabled=True, width="small"),
                 "Type": st.column_config.SelectboxColumn(
                     "Type",
-                    options=["multiple_choice", "true_false", "short_answer"],
-                    required=True
+                    options=["multiple_choice", "true_false", "short_answer", "matching", "fill_in_blank"],
+                    required=True,
+                    width="small"
                 ),
                 "Question": st.column_config.TextColumn("Question", width="large"),
-                "Option A": st.column_config.TextColumn("A"),
+                "Option A": st.column_config.TextColumn("A", help="For matching: use 'left:right; left2:right2' format"),
                 "Option B": st.column_config.TextColumn("B"),
                 "Option C": st.column_config.TextColumn("C"),
                 "Option D": st.column_config.TextColumn("D"),
-                "Correct Answer": st.column_config.TextColumn("Answer"),
+                "Correct Answer": st.column_config.TextColumn("Answer", width="medium"),
                 "Explanation": st.column_config.TextColumn("Explanation", width="medium"),
-                "Misconception": st.column_config.TextColumn("Misconception")
+                "Misconception": st.column_config.TextColumn("Misconception", width="small")
             },
             key="quiz_editor"
         )
@@ -691,23 +952,38 @@ def render_editor_step():
         st.session_state.quiz_df = edited_df
         st.session_state.quiz_data = dataframe_to_quiz(edited_df)
 
-    # Quiz title input
-    st.session_state.quiz_title = st.text_input(
-        "Quiz Title",
-        value=st.session_state.quiz_title,
-        placeholder="Enter a title for this quiz"
-    )
+    # Quiz metadata section
+    col_meta1, col_meta2 = st.columns(2)
+    with col_meta1:
+        st.session_state.quiz_title = st.text_input(
+            "Quiz Title",
+            value=st.session_state.quiz_title,
+            placeholder="Enter a title for this quiz"
+        )
+    with col_meta2:
+        st.text_input(
+            "Subject",
+            value=st.session_state.quiz_subject,
+            placeholder="Auto-detected from analysis",
+            disabled=True
+        )
 
     # Navigation buttons
+    st.markdown("---")
     col1, col2, col3 = st.columns([1, 1, 1])
 
     with col1:
-        if st.button("← Back to Extraction"):
+        if st.button("← Back to Extraction", use_container_width=True):
             st.session_state.wizard_step = STEP_EXTRACTION
             st.rerun()
 
+    with col2:
+        # Quick stats
+        total_q = len(st.session_state.quiz_data) if st.session_state.quiz_data else 0
+        st.info(f"📊 {total_q} questions ready")
+
     with col3:
-        if st.button("Continue to Play →", width="stretch"):
+        if st.button("Continue to Play →", use_container_width=True, type="primary"):
             st.session_state.wizard_step = STEP_PLAY
             st.session_state.game_mode = "setup"
             st.rerun()
@@ -757,7 +1033,7 @@ def render_action_step():
             variant="success"
         )
 
-        if st.button("🎮 Start Playing", width="stretch", key="play_btn"):
+        if st.button("🎮 Start Playing", use_container_width=True, key="play_btn"):
             start_game()
             st.rerun()
 
@@ -793,7 +1069,7 @@ def render_action_step():
                     data=pdf_student,
                     file_name=get_download_filename(st.session_state.quiz_title + "_Student", "pdf"),
                     mime="application/pdf",
-                    width="stretch"
+                    use_container_width=True
                 )
             except Exception as e:
                 render_info_box(f"PDF error: {str(e)[:50]}", variant="error", icon="⚠️")
@@ -813,7 +1089,7 @@ def render_action_step():
                     data=pdf_teacher,
                     file_name=get_download_filename(st.session_state.quiz_title + "_Teacher", "pdf"),
                     mime="application/pdf",
-                    width="stretch"
+                    use_container_width=True
                 )
             except Exception as e:
                 render_info_box(f"PDF error: {str(e)[:50]}", variant="error", icon="⚠️")
@@ -834,27 +1110,31 @@ def render_action_step():
                     data=docx_file,
                     file_name=get_download_filename(st.session_state.quiz_title, "docx"),
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    width="stretch"
+                    use_container_width=True
                 )
             except Exception as e:
                 render_info_box(f"DOCX error: {str(e)[:50]}", variant="error", icon="⚠️")
 
         with dcol4:
-            # JSON export (lightweight, no caching needed)
+            # JSON export with full state (lightweight, no caching needed)
             json_data = create_json_export(
                 st.session_state.quiz_data,
                 metadata={
                     "title": st.session_state.quiz_title,
                     "subject": st.session_state.quiz_subject,
-                    "grade": st.session_state.quiz_grade
-                }
+                    "grade": st.session_state.quiz_grade,
+                    "language": st.session_state.get("quiz_language", "English"),
+                },
+                analysis_result=st.session_state.analysis_result,
+                quiz_settings=st.session_state.get("last_generation_settings"),
+                game_state=None  # No game state on initial export
             )
             st.download_button(
                 "💾 JSON Data",
                 data=json_data,
                 file_name=get_download_filename(st.session_state.quiz_title, "json"),
                 mime="application/json",
-                width="stretch"
+                use_container_width=True
             )
 
     # Back button
@@ -955,14 +1235,14 @@ def render_play_mode():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             if current_idx + 1 < total_questions:
-                if st.button("Next Question →", width="stretch"):
+                if st.button("Next Question →", use_container_width=True):
                     st.session_state.current_question_index += 1
                     st.session_state.answer_submitted = False
                     st.session_state.selected_answer = None
                     st.session_state.user_text_answer = ""
                     st.rerun()
             else:
-                if st.button("🏆 See Results", width="stretch"):
+                if st.button("🏆 See Results", use_container_width=True):
                     st.session_state.wizard_step = STEP_RESULTS
                     st.rerun()
 
@@ -979,7 +1259,7 @@ def render_mc_options(question: dict):
             if st.button(
                 f"{labels[i]}. {opt}",
                 key=f"mc_opt_{i}",
-                width="stretch"
+                use_container_width=True
             ):
                 st.session_state.selected_answer = i
                 process_answer(question, i)
@@ -991,13 +1271,13 @@ def render_tf_options(question: dict):
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("✓ True", key="tf_true", width="stretch"):
+        if st.button("✓ True", key="tf_true", use_container_width=True):
             st.session_state.selected_answer = 0
             process_answer(question, 0)
             st.rerun()
 
     with col2:
-        if st.button("✗ False", key="tf_false", width="stretch"):
+        if st.button("✗ False", key="tf_false", use_container_width=True):
             st.session_state.selected_answer = 1
             process_answer(question, 1)
             st.rerun()
@@ -1013,7 +1293,7 @@ def render_sa_input(question: dict):
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("Submit Answer", width="stretch", disabled=not user_answer):
+        if st.button("Submit Answer", use_container_width=True, disabled=not user_answer):
             st.session_state.user_text_answer = user_answer
             process_answer(question, -1, user_answer)
             st.rerun()
@@ -1109,18 +1389,18 @@ def render_results_step():
     col1, col2, col3 = st.columns([1, 1, 1])
 
     with col1:
-        if st.button("🔄 Play Again", width="stretch"):
+        if st.button("🔄 Play Again", use_container_width=True):
             start_game()
             st.rerun()
 
     with col2:
-        if st.button("✏️ Edit Quiz", width="stretch"):
+        if st.button("✏️ Edit Quiz", use_container_width=True):
             st.session_state.game_mode = "setup"
             st.session_state.wizard_step = STEP_EDITOR
             st.rerun()
 
     with col3:
-        if st.button("📚 New Quiz", width="stretch"):
+        if st.button("📚 New Quiz", use_container_width=True):
             reset_to_setup()
             st.rerun()
 

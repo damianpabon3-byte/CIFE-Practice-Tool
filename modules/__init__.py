@@ -14,6 +14,7 @@ from .vision_processor import (
 from .content_generator import (
     generate_quiz,
     generate_quiz_from_analysis,
+    generate_quiz_from_analysis_batched,
     quiz_to_dataframe,
     dataframe_to_quiz,
     create_smart_blank
@@ -56,7 +57,8 @@ from .exporter import (
     create_json_export,
     import_from_json,
     create_answer_sheet_pdf,
-    get_download_filename
+    get_download_filename,
+    QUIZ_SCHEMA_VERSION
 )
 
 __all__ = [
@@ -69,6 +71,7 @@ __all__ = [
     # Content generator
     'generate_quiz',
     'generate_quiz_from_analysis',
+    'generate_quiz_from_analysis_batched',
     'quiz_to_dataframe',
     'dataframe_to_quiz',
     'create_smart_blank',
@@ -108,5 +111,6 @@ __all__ = [
     'create_json_export',
     'import_from_json',
     'create_answer_sheet_pdf',
-    'get_download_filename'
+    'get_download_filename',
+    'QUIZ_SCHEMA_VERSION'
 ]

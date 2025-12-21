@@ -258,6 +258,7 @@ def _validate_question(question: Dict, index: int) -> Optional[Dict]:
     Validate and normalize a question dictionary.
 
     Returns None if the question is invalid.
+    Supports: multiple_choice, true_false, short_answer, matching, fill_in_blank
     """
     required_fields = ["question_text", "question_type", "correct_answer"]
 
@@ -267,28 +268,76 @@ def _validate_question(question: Dict, index: int) -> Optional[Dict]:
             return None
 
     # Normalize question type
-    q_type = question["question_type"].lower().replace(" ", "_")
-    if q_type not in ["multiple_choice", "true_false", "short_answer"]:
+    q_type = question["question_type"].lower().replace(" ", "_").replace("-", "_")
+
+    # Map aliases to canonical types
+    type_aliases = {
+        "mc": "multiple_choice",
+        "multiplechoice": "multiple_choice",
+        "tf": "true_false",
+        "truefalse": "true_false",
+        "sa": "short_answer",
+        "shortanswer": "short_answer",
+        "match": "matching",
+        "pairs": "matching",
+        "fill": "fill_in_blank",
+        "fillin": "fill_in_blank",
+        "blank": "fill_in_blank",
+        "fib": "fill_in_blank"
+    }
+
+    q_type = type_aliases.get(q_type, q_type)
+
+    # Validate question type
+    valid_types = ["multiple_choice", "true_false", "short_answer", "matching", "fill_in_blank"]
+    if q_type not in valid_types:
         q_type = "multiple_choice"
     question["question_type"] = q_type
 
-    # Ensure options exist for MC and T/F
+    # Type-specific validation
     if q_type == "multiple_choice":
-        if "options" not in question or len(question["options"]) != 4:
+        if "options" not in question or len(question.get("options", [])) < 2:
             return None
+        # Pad to 4 options if needed
+        while len(question["options"]) < 4:
+            question["options"].append("")
+
     elif q_type == "true_false":
         # Normalize T/F options
-        if "options" not in question or len(question["options"]) < 2:
+        if "options" not in question or len(question.get("options", [])) < 2:
             question["options"] = ["True", "False"]
-    else:
+
+    elif q_type == "matching":
+        # Matching needs pairs array
+        if "pairs" not in question or not isinstance(question.get("pairs"), list):
+            # Try to convert from other formats
+            if "options" in question and isinstance(question["options"], list):
+                # Convert options to pairs format
+                pairs = []
+                for i, opt in enumerate(question["options"][:10]):
+                    if isinstance(opt, dict):
+                        pairs.append(opt)
+                    elif isinstance(opt, str) and ":" in opt:
+                        left, right = opt.split(":", 1)
+                        pairs.append({"left": left.strip(), "right": right.strip()})
+                question["pairs"] = pairs if pairs else []
+            else:
+                question["pairs"] = []
+        question["options"] = []  # Matching doesn't use traditional options
+
+    elif q_type == "fill_in_blank":
+        question["options"] = []
+
+    else:  # short_answer
         question["options"] = []
 
     # Ensure correct_answer_index exists and is valid
     if "correct_answer_index" not in question:
-        if q_type == "multiple_choice" and question["correct_answer"] in question["options"]:
+        if q_type == "multiple_choice" and question["correct_answer"] in question.get("options", []):
             question["correct_answer_index"] = question["options"].index(question["correct_answer"])
         elif q_type == "true_false":
-            question["correct_answer_index"] = 0 if question["correct_answer"].lower() in ["true", "verdadero"] else 1
+            correct_lower = str(question["correct_answer"]).lower()
+            question["correct_answer_index"] = 0 if correct_lower in ["true", "verdadero"] else 1
         else:
             question["correct_answer_index"] = -1
 
@@ -462,6 +511,8 @@ def quiz_to_dataframe(questions: List[Dict[str, Any]]) -> pd.DataFrame:
     """
     Convert a list of questions to a Pandas DataFrame for editing.
 
+    Supports: multiple_choice, true_false, short_answer, matching, fill_in_blank
+
     Args:
         questions: List of question dictionaries
 
@@ -470,18 +521,31 @@ def quiz_to_dataframe(questions: List[Dict[str, Any]]) -> pd.DataFrame:
     """
     rows = []
     for i, q in enumerate(questions):
+        q_type = q.get("question_type", "multiple_choice")
+        options = q.get("options", [])
+
         row = {
             "Index": i + 1,
-            "Type": q.get("question_type", "multiple_choice"),
+            "Type": q_type,
             "Question": q.get("question_text", ""),
-            "Option A": q["options"][0] if len(q.get("options", [])) > 0 else "",
-            "Option B": q["options"][1] if len(q.get("options", [])) > 1 else "",
-            "Option C": q["options"][2] if len(q.get("options", [])) > 2 else "",
-            "Option D": q["options"][3] if len(q.get("options", [])) > 3 else "",
+            "Option A": options[0] if len(options) > 0 else "",
+            "Option B": options[1] if len(options) > 1 else "",
+            "Option C": options[2] if len(options) > 2 else "",
+            "Option D": options[3] if len(options) > 3 else "",
             "Correct Answer": q.get("correct_answer", ""),
             "Explanation": q.get("explanation", ""),
             "Misconception": q.get("misconception_tag", "")
         }
+
+        # For matching questions, serialize pairs to Option A column
+        if q_type == "matching" and "pairs" in q:
+            pairs = q.get("pairs", [])
+            pairs_str = "; ".join([f"{p.get('left', '')}:{p.get('right', '')}" for p in pairs[:10]])
+            row["Option A"] = pairs_str
+            row["Option B"] = "(matching pairs)"
+            row["Option C"] = ""
+            row["Option D"] = ""
+
         rows.append(row)
 
     return pd.DataFrame(rows)
@@ -490,6 +554,8 @@ def quiz_to_dataframe(questions: List[Dict[str, Any]]) -> pd.DataFrame:
 def dataframe_to_quiz(df: pd.DataFrame) -> List[Dict[str, Any]]:
     """
     Convert an edited DataFrame back to quiz format.
+
+    Supports: multiple_choice, true_false, short_answer, matching, fill_in_blank
 
     Args:
         df: Edited DataFrame from st.data_editor
@@ -500,7 +566,18 @@ def dataframe_to_quiz(df: pd.DataFrame) -> List[Dict[str, Any]]:
     questions = []
 
     for _, row in df.iterrows():
-        q_type = row.get("Type", "multiple_choice")
+        q_type = str(row.get("Type", "multiple_choice")).lower().replace(" ", "_")
+        correct_answer = str(row.get("Correct Answer", ""))
+
+        # Normalize question type
+        type_map = {
+            "mc": "multiple_choice",
+            "tf": "true_false",
+            "sa": "short_answer",
+            "match": "matching",
+            "fib": "fill_in_blank"
+        }
+        q_type = type_map.get(q_type, q_type)
 
         # Build options based on question type
         if q_type == "multiple_choice":
@@ -510,12 +587,28 @@ def dataframe_to_quiz(df: pd.DataFrame) -> List[Dict[str, Any]]:
                 str(row.get("Option C", "")),
                 str(row.get("Option D", ""))
             ]
+            # Filter out empty options
+            options = [o for o in options if o.strip()]
+            # Pad back to 4 if needed
+            while len(options) < 4:
+                options.append("")
+
         elif q_type == "true_false":
             options = ["True", "False"]
-        else:
-            options = []
 
-        correct_answer = str(row.get("Correct Answer", ""))
+        elif q_type == "matching":
+            options = []
+            # Parse pairs from Option A
+            pairs_str = str(row.get("Option A", ""))
+            pairs = []
+            if pairs_str and pairs_str != "(matching pairs)":
+                for pair in pairs_str.split(";"):
+                    if ":" in pair:
+                        left, right = pair.split(":", 1)
+                        pairs.append({"left": left.strip(), "right": right.strip()})
+
+        else:  # short_answer, fill_in_blank
+            options = []
 
         # Determine correct_answer_index
         if q_type == "multiple_choice" and correct_answer in options:
@@ -534,6 +627,11 @@ def dataframe_to_quiz(df: pd.DataFrame) -> List[Dict[str, Any]]:
             "explanation": str(row.get("Explanation", "")),
             "misconception_tag": str(row.get("Misconception", ""))
         }
+
+        # Add pairs for matching questions
+        if q_type == "matching":
+            question["pairs"] = pairs
+
         questions.append(question)
 
     return questions
