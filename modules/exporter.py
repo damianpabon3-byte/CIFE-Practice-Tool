@@ -159,7 +159,13 @@ def create_pdf(
             if pdf.get_y() > 250:
                 pdf.add_page()
 
-    return pdf.output(dest='S').encode('latin-1')
+    # fpdf2 returns bytearray from output(dest='S'), handle all cases safely
+    output = pdf.output(dest='S')
+    if isinstance(output, bytearray):
+        return bytes(output)
+    if isinstance(output, str):
+        return output.encode('latin-1')
+    return bytes(output)
 
 
 def create_docx(
@@ -417,7 +423,13 @@ def create_answer_sheet_pdf(
         if pdf.get_y() > 270:
             pdf.add_page()
 
-    return pdf.output(dest='S').encode('latin-1')
+    # fpdf2 returns bytearray from output(dest='S'), handle all cases safely
+    output = pdf.output(dest='S')
+    if isinstance(output, bytearray):
+        return bytes(output)
+    if isinstance(output, str):
+        return output.encode('latin-1')
+    return bytes(output)
 
 
 def get_download_filename(title: str, extension: str) -> str:

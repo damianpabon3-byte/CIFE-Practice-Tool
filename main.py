@@ -265,7 +265,7 @@ def render_sidebar():
             render_info_box("API key required to proceed (set OPENAI_API_KEY in Streamlit Secrets)", variant="warning", icon="⚠️")
 # Reset button
         st.divider()
-        if st.button("🔄 Start Over", use_container_width=True):
+        if st.button("🔄 Start Over", width="stretch"):
             reset_to_setup()
             st.rerun()
 
@@ -318,7 +318,7 @@ def render_ingestion_step(api_key: str):
             cols = st.columns(min(len(uploaded_files), 4))
             for i, file in enumerate(uploaded_files[:4]):
                 with cols[i]:
-                    st.image(file, caption=f"Image {i+1}", use_container_width=True)
+                    st.image(file, caption=f"Image {i+1}", width="stretch")
 
     with col2:
         render_card(
@@ -339,7 +339,7 @@ def render_ingestion_step(api_key: str):
     with col2:
         if st.button(
             "🔍 Analyze Notebook →",
-            use_container_width=True,
+            width="stretch",
             disabled=not uploaded_files or not api_key
         ):
             st.session_state.wizard_step = STEP_EXTRACTION
@@ -366,17 +366,34 @@ def render_extraction_step(api_key: str):
             with progress_placeholder.container():
                 render_info_box("Reading handwriting...", variant="info", icon="📖")
 
-            # Analyze images
-            if len(st.session_state.uploaded_files) == 1:
-                analysis = analyze_notebook_image(
-                    st.session_state.uploaded_files[0],
-                    api_key
-                )
-            else:
-                analysis = analyze_multiple_images(
-                    st.session_state.uploaded_files,
-                    api_key
-                )
+            # Validate API key before calling OpenAI
+            if not api_key or len(api_key.strip()) < 10:
+                raise ValueError("Invalid API key. Please provide a valid OpenAI API key.")
+
+            # Analyze images with defensive error handling
+            try:
+                if len(st.session_state.uploaded_files) == 1:
+                    analysis = analyze_notebook_image(
+                        st.session_state.uploaded_files[0],
+                        api_key
+                    )
+                else:
+                    analysis = analyze_multiple_images(
+                        st.session_state.uploaded_files,
+                        api_key
+                    )
+            except Exception as api_error:
+                error_msg = str(api_error).lower()
+                if "rate limit" in error_msg or "429" in error_msg:
+                    raise Exception("Rate limit exceeded. Please wait a moment and try again.")
+                elif "invalid" in error_msg and "key" in error_msg:
+                    raise Exception("Invalid API key. Please check your OpenAI API key.")
+                elif "timeout" in error_msg:
+                    raise Exception("Request timed out. Please try again.")
+                elif "connection" in error_msg:
+                    raise Exception("Connection error. Please check your internet connection.")
+                else:
+                    raise Exception(f"OpenAI API error: {str(api_error)[:100]}")
 
             st.session_state.analysis_result = analysis
             st.session_state.quiz_subject = analysis.get("subject", "General")
@@ -462,22 +479,33 @@ def render_extraction_step(api_key: str):
             with col3:
                 if st.button(
                     "Generate Quiz →",
-                    use_container_width=True,
+                    width="stretch",
                     disabled=total == 0
                 ):
-                    # Generate quiz
+                    # Generate quiz with defensive error handling
                     with st.spinner("Generating questions..."):
-                        questions = generate_quiz_from_analysis(
-                            analysis,
-                            api_key,
-                            mc_count=st.session_state.mc_count,
-                            tf_count=st.session_state.tf_count,
-                            sa_count=st.session_state.sa_count
-                        )
-                        st.session_state.quiz_data = questions
-                        st.session_state.quiz_df = quiz_to_dataframe(questions)
-                        st.session_state.wizard_step = STEP_EDITOR
-                        st.rerun()
+                        try:
+                            questions = generate_quiz_from_analysis(
+                                analysis,
+                                api_key,
+                                mc_count=st.session_state.mc_count,
+                                tf_count=st.session_state.tf_count,
+                                sa_count=st.session_state.sa_count
+                            )
+                            if not questions:
+                                raise ValueError("No questions were generated. Please try again.")
+                            st.session_state.quiz_data = questions
+                            st.session_state.quiz_df = quiz_to_dataframe(questions)
+                            st.session_state.wizard_step = STEP_EDITOR
+                            st.rerun()
+                        except Exception as gen_error:
+                            error_msg = str(gen_error).lower()
+                            if "rate limit" in error_msg or "429" in error_msg:
+                                st.error("⚠️ Rate limit exceeded. Please wait a moment and try again.")
+                            elif "invalid" in error_msg and "key" in error_msg:
+                                st.error("⚠️ Invalid API key. Please check your OpenAI API key.")
+                            else:
+                                st.error(f"⚠️ Quiz generation failed: {str(gen_error)[:100]}")
 
         except Exception as e:
             render_info_box(f"Analysis failed: {str(e)}", variant="error", icon="❌")
@@ -517,7 +545,7 @@ def render_editor_step():
     if st.session_state.quiz_df is not None:
         edited_df = st.data_editor(
             st.session_state.quiz_df,
-            use_container_width=True,
+            width="stretch",
             num_rows="dynamic",
             column_config={
                 "Index": st.column_config.NumberColumn("Q#", disabled=True),
@@ -558,7 +586,7 @@ def render_editor_step():
             st.rerun()
 
     with col3:
-        if st.button("Continue to Play →", use_container_width=True):
+        if st.button("Continue to Play →", width="stretch"):
             st.session_state.wizard_step = STEP_PLAY
             st.session_state.game_mode = "setup"
             st.rerun()
@@ -567,6 +595,22 @@ def render_editor_step():
 # =============================================================================
 # Step 4: Publication/Play (Action Selection)
 # =============================================================================
+@st.cache_data(show_spinner=False)
+def _cached_create_pdf(quiz_data_json: str, title: str, subject: str, grade: str, include_answers: bool) -> bytes:
+    """Cached PDF generation to avoid regenerating on every render."""
+    import json
+    quiz_data = json.loads(quiz_data_json)
+    return create_pdf(quiz_data, title=title, subject=subject, grade=grade, include_answers=include_answers)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_create_docx(quiz_data_json: str, title: str, subject: str, grade: str) -> bytes:
+    """Cached DOCX generation to avoid regenerating on every render."""
+    import json
+    quiz_data = json.loads(quiz_data_json)
+    return create_docx(quiz_data, title=title, subject=subject, grade=grade)
+
+
 def render_action_step():
     """Render the action selection step (Publication or Play)."""
 
@@ -592,7 +636,7 @@ def render_action_step():
             variant="success"
         )
 
-        if st.button("🎮 Start Playing", use_container_width=True, key="play_btn"):
+        if st.button("🎮 Start Playing", width="stretch", key="play_btn"):
             start_game()
             st.rerun()
 
@@ -607,63 +651,75 @@ def render_action_step():
             """
         )
 
-        # Download options
+        # Serialize quiz data for caching (makes it hashable)
+        quiz_data_json = json.dumps(st.session_state.quiz_data, ensure_ascii=False)
+
+        # Download options - using cached generation
         dcol1, dcol2 = st.columns(2)
 
         with dcol1:
-            # Student worksheet (no answers)
-            pdf_student = create_pdf(
-                st.session_state.quiz_data,
-                title=st.session_state.quiz_title,
-                subject=st.session_state.quiz_subject,
-                grade=st.session_state.quiz_grade,
-                include_answers=False
-            )
-            st.download_button(
-                "📝 Student PDF",
-                data=pdf_student,
-                file_name=get_download_filename(st.session_state.quiz_title + "_Student", "pdf"),
-                mime="application/pdf",
-                use_container_width=True
-            )
+            # Student worksheet (no answers) - lazily cached
+            try:
+                pdf_student = _cached_create_pdf(
+                    quiz_data_json,
+                    title=st.session_state.quiz_title,
+                    subject=st.session_state.quiz_subject,
+                    grade=st.session_state.quiz_grade,
+                    include_answers=False
+                )
+                st.download_button(
+                    "📝 Student PDF",
+                    data=pdf_student,
+                    file_name=get_download_filename(st.session_state.quiz_title + "_Student", "pdf"),
+                    mime="application/pdf",
+                    width="stretch"
+                )
+            except Exception as e:
+                render_info_box(f"PDF error: {str(e)[:50]}", variant="error", icon="⚠️")
 
         with dcol2:
-            # Teacher key (with answers)
-            pdf_teacher = create_pdf(
-                st.session_state.quiz_data,
-                title=st.session_state.quiz_title,
-                subject=st.session_state.quiz_subject,
-                grade=st.session_state.quiz_grade,
-                include_answers=True
-            )
-            st.download_button(
-                "📋 Teacher PDF",
-                data=pdf_teacher,
-                file_name=get_download_filename(st.session_state.quiz_title + "_Teacher", "pdf"),
-                mime="application/pdf",
-                use_container_width=True
-            )
+            # Teacher key (with answers) - lazily cached
+            try:
+                pdf_teacher = _cached_create_pdf(
+                    quiz_data_json,
+                    title=st.session_state.quiz_title,
+                    subject=st.session_state.quiz_subject,
+                    grade=st.session_state.quiz_grade,
+                    include_answers=True
+                )
+                st.download_button(
+                    "📋 Teacher PDF",
+                    data=pdf_teacher,
+                    file_name=get_download_filename(st.session_state.quiz_title + "_Teacher", "pdf"),
+                    mime="application/pdf",
+                    width="stretch"
+                )
+            except Exception as e:
+                render_info_box(f"PDF error: {str(e)[:50]}", variant="error", icon="⚠️")
 
         dcol3, dcol4 = st.columns(2)
 
         with dcol3:
-            # Word document
-            docx_file = create_docx(
-                st.session_state.quiz_data,
-                title=st.session_state.quiz_title,
-                subject=st.session_state.quiz_subject,
-                grade=st.session_state.quiz_grade
-            )
-            st.download_button(
-                "📄 Word Doc",
-                data=docx_file,
-                file_name=get_download_filename(st.session_state.quiz_title, "docx"),
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True
-            )
+            # Word document - lazily cached
+            try:
+                docx_file = _cached_create_docx(
+                    quiz_data_json,
+                    title=st.session_state.quiz_title,
+                    subject=st.session_state.quiz_subject,
+                    grade=st.session_state.quiz_grade
+                )
+                st.download_button(
+                    "📄 Word Doc",
+                    data=docx_file,
+                    file_name=get_download_filename(st.session_state.quiz_title, "docx"),
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    width="stretch"
+                )
+            except Exception as e:
+                render_info_box(f"DOCX error: {str(e)[:50]}", variant="error", icon="⚠️")
 
         with dcol4:
-            # JSON export
+            # JSON export (lightweight, no caching needed)
             json_data = create_json_export(
                 st.session_state.quiz_data,
                 metadata={
@@ -677,7 +733,7 @@ def render_action_step():
                 data=json_data,
                 file_name=get_download_filename(st.session_state.quiz_title, "json"),
                 mime="application/json",
-                use_container_width=True
+                width="stretch"
             )
 
     # Back button
@@ -778,14 +834,14 @@ def render_play_mode():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             if current_idx + 1 < total_questions:
-                if st.button("Next Question →", use_container_width=True):
+                if st.button("Next Question →", width="stretch"):
                     st.session_state.current_question_index += 1
                     st.session_state.answer_submitted = False
                     st.session_state.selected_answer = None
                     st.session_state.user_text_answer = ""
                     st.rerun()
             else:
-                if st.button("🏆 See Results", use_container_width=True):
+                if st.button("🏆 See Results", width="stretch"):
                     st.session_state.wizard_step = STEP_RESULTS
                     st.rerun()
 
@@ -802,7 +858,7 @@ def render_mc_options(question: dict):
             if st.button(
                 f"{labels[i]}. {opt}",
                 key=f"mc_opt_{i}",
-                use_container_width=True
+                width="stretch"
             ):
                 st.session_state.selected_answer = i
                 process_answer(question, i)
@@ -814,13 +870,13 @@ def render_tf_options(question: dict):
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("✓ True", key="tf_true", use_container_width=True):
+        if st.button("✓ True", key="tf_true", width="stretch"):
             st.session_state.selected_answer = 0
             process_answer(question, 0)
             st.rerun()
 
     with col2:
-        if st.button("✗ False", key="tf_false", use_container_width=True):
+        if st.button("✗ False", key="tf_false", width="stretch"):
             st.session_state.selected_answer = 1
             process_answer(question, 1)
             st.rerun()
@@ -836,7 +892,7 @@ def render_sa_input(question: dict):
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("Submit Answer", use_container_width=True, disabled=not user_answer):
+        if st.button("Submit Answer", width="stretch", disabled=not user_answer):
             st.session_state.user_text_answer = user_answer
             process_answer(question, -1, user_answer)
             st.rerun()
@@ -932,18 +988,18 @@ def render_results_step():
     col1, col2, col3 = st.columns([1, 1, 1])
 
     with col1:
-        if st.button("🔄 Play Again", use_container_width=True):
+        if st.button("🔄 Play Again", width="stretch"):
             start_game()
             st.rerun()
 
     with col2:
-        if st.button("✏️ Edit Quiz", use_container_width=True):
+        if st.button("✏️ Edit Quiz", width="stretch"):
             st.session_state.game_mode = "setup"
             st.session_state.wizard_step = STEP_EDITOR
             st.rerun()
 
     with col3:
-        if st.button("📚 New Quiz", use_container_width=True):
+        if st.button("📚 New Quiz", width="stretch"):
             reset_to_setup()
             st.rerun()
 
