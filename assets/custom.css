@@ -5,8 +5,30 @@
 @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@300;400;500;600;700&display=swap');
 
 /* Global Font Application */
-html, body, button, input, textarea, select, [class*="st-"] {
+/* Apply Fredoka to text elements, but EXCLUDE Material Icons */
+html, body, button, input, textarea, select {
     font-family: 'Fredoka', sans-serif !important;
+}
+
+/* Apply to Streamlit elements but exclude icon containers */
+.stMarkdown, .stText, .stButton > button, .stTextInput, .stTextArea,
+.stSelectbox, .stMultiSelect, .stRadio, .stCheckbox label,
+.stDataFrame, .stTable, .stMetric, .stAlert, .stInfo, .stSuccess,
+.stWarning, .stError, h1, h2, h3, h4, h5, h6, p, span:not([data-testid]),
+div.stTabs, .stExpander > summary > span:first-child {
+    font-family: 'Fredoka', sans-serif !important;
+}
+
+/* CRITICAL: Preserve Material Icons font for Streamlit icons */
+/* This prevents "keyboard_arrow_right" from showing as text */
+[data-testid="stExpanderToggleIcon"],
+[data-testid="stExpanderToggleIcon"] *,
+.stIcon, .stIcon *,
+span[data-baseweb="icon"],
+span[data-baseweb="icon"] *,
+[class*="Icon"], [class*="icon"],
+svg, svg * {
+    font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
 }
 
 /* Color Palette Variables */
@@ -593,4 +615,93 @@ section[data-testid="stSidebar"] h3 {
     margin-top: 1rem;
     border-left: 4px solid var(--primary-indigo);
     text-align: left;
+}
+
+/* ============================================= */
+/* EXPANDER STYLES - Fix icons and readability  */
+/* ============================================= */
+
+/* Expander container with white background for contrast */
+.stExpander {
+    background: white !important;
+    border-radius: 16px !important;
+    border: 2px solid #E5E7EB !important;
+    box-shadow: var(--card-shadow) !important;
+    margin-bottom: 1rem !important;
+    overflow: hidden !important;
+}
+
+/* Expander header styling */
+.stExpander > details > summary {
+    background: white !important;
+    padding: 1rem 1.25rem !important;
+    border-radius: 14px !important;
+    cursor: pointer !important;
+    transition: background-color 0.2s ease !important;
+}
+
+.stExpander > details > summary:hover {
+    background: #F9FAFB !important;
+}
+
+/* Expander header text - ensure dark and readable */
+.stExpander > details > summary > span {
+    color: var(--text-dark) !important;
+    font-weight: 500 !important;
+}
+
+/* Expander content area */
+.stExpander > details > div {
+    background: #FAFAFA !important;
+    padding: 1rem 1.25rem !important;
+    border-top: 1px solid #E5E7EB !important;
+}
+
+/* ============================================= */
+/* IMPROVED TEXT CONTRAST ON LIGHT BACKGROUNDS  */
+/* ============================================= */
+
+/* Ensure all body text has good contrast */
+.stApp p, .stApp span, .stApp div {
+    color: var(--text-dark);
+}
+
+/* Make sure markdown text is readable */
+.stMarkdown p {
+    color: #1F2937 !important;
+    line-height: 1.6 !important;
+}
+
+/* Strong dark text for headings */
+.stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
+.stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
+    color: #111827 !important;
+}
+
+/* Sidebar text override to white */
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] div,
+section[data-testid="stSidebar"] label {
+    color: white !important;
+}
+
+/* Mobile-specific improvements for readability */
+@media (max-width: 768px) {
+    .stExpander > details > summary {
+        padding: 0.875rem 1rem !important;
+    }
+
+    .stExpander > details > summary > span {
+        font-size: 0.95rem !important;
+    }
+
+    .stMarkdown p {
+        font-size: 1rem !important;
+    }
+
+    /* Increase touch target for expanders on mobile */
+    .stExpander > details > summary {
+        min-height: 48px !important;
+    }
 }

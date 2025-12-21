@@ -38,9 +38,26 @@ def _get_fallback_css() -> str:
     /* Google Fonts Import - Fredoka */
     @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@300;400;500;600;700&display=swap');
 
-    /* Global Font Application */
-    html, body, button, input, textarea, select, [class*="st-"], .stMarkdown, .stButton > button {
+    /* Global Font Application - EXCLUDE Material Icons */
+    html, body, button, input, textarea, select {
         font-family: 'Fredoka', sans-serif !important;
+    }
+
+    /* Apply to Streamlit elements but exclude icon containers */
+    .stMarkdown, .stText, .stButton > button, .stTextInput, .stTextArea,
+    .stSelectbox, .stMultiSelect, .stRadio, .stCheckbox label,
+    h1, h2, h3, h4, h5, h6, p, span:not([data-testid]) {
+        font-family: 'Fredoka', sans-serif !important;
+    }
+
+    /* CRITICAL: Preserve Material Icons font for Streamlit icons */
+    [data-testid="stExpanderToggleIcon"],
+    [data-testid="stExpanderToggleIcon"] *,
+    .stIcon, .stIcon *,
+    span[data-baseweb="icon"],
+    span[data-baseweb="icon"] *,
+    svg, svg * {
+        font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
     }
 
     /* Color Palette Variables */
@@ -441,7 +458,7 @@ def render_card_button(
     clicked = st.button(
         button_text,
         key=key,
-        use_container_width=True,
+        width="stretch",
         disabled=disabled
     )
 
@@ -522,7 +539,7 @@ def render_option_card(
     clicked = st.button(
         f"Select {option_label}",
         key=key,
-        use_container_width=True,
+        width="stretch",
         disabled=disabled
     )
 
